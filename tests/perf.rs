@@ -3,14 +3,22 @@
 //! These are `#[ignore]` tests — run them explicitly:
 //!
 //! ```sh
+//! # All perf tests (no mermaid feature):
 //! cargo test --test perf -- --ignored --nocapture
+//!
+//! # All perf tests (with mermaid feature):
 //! cargo test --test perf --features mermaid -- --ignored --nocapture
+//!
+//! # Only the mermaid comparison tests:
+//! cargo test --test perf perf_mermaid -- --ignored --nocapture
+//! cargo test --test perf --features mermaid perf_mermaid -- --ignored --nocapture
 //! ```
 //!
 //! They measure:
 //! - **CPU**: time to render documents of increasing size
 //! - **Memory**: ratio of rendered `Line` storage to input size
 //! - **Scroll**: time to slice a viewport from a large document
+//! - **Mermaid**: render timing with and without the `mermaid` feature
 //!
 //! Memory is estimated from the rendered line count and average span
 //! allocation count rather than a system allocator hook, keeping the
@@ -21,6 +29,7 @@ use std::time::{Duration, Instant};
 use lessmd::document::Document;
 use lessmd::pager::PagerState;
 use lessmd::render::markdown::render_markdown;
+use lessmd::render::mermaid::{DefaultMermaidRenderer, MermaidRenderer};
 use lessmd::render::text::render_text;
 use lessmd::source::{Input, ResolvedMode};
 
@@ -62,6 +71,39 @@ fn gen_markdown_doc(n_sections: usize, lines_per_section: usize) -> String {
             s.push('\n');
         }
         s.push('\n');
+    }
+    s
+}
+
+/// Generate a markdown document with `n` flowchart mermaid blocks
+/// interspersed with text paragraphs.
+fn gen_markdown_with_mermaid(n_diagrams: usize) -> String {
+    let mut s = String::new();
+    s.push_str("# Document with Mermaid diagrams\n\n");
+    for i in 0..n_diagrams {
+        s.push_str(&format!("## Section {i}\n\n"));
+        s.push_str(&format!("Some text before diagram {i}.\n\n"));
+        s.push_str("```mermaid\n");
+        s.push_str(&format!(
+            "graph LR\n    A[Start {i}] --> B[Process {i}] --> C[End {i}]\n"
+        ));
+        s.push_str("```\n\n");
+        s.push_str(&format!("Some text after diagram {i}.\n\n"));
+    }
+    s
+}
+
+/// Generate a markdown document with `n` sequence diagrams.
+fn gen_markdown_with_sequence(n_diagrams: usize) -> String {
+    let mut s = String::new();
+    s.push_str("# Sequence diagrams\n\n");
+    for i in 0..n_diagrams {
+        s.push_str(&format!("## Interaction {i}\n\n"));
+        s.push_str("```mermaid\n");
+        s.push_str(&format!(
+            "sequenceDiagram\n    Alice->>Bob: Request {i}\n    Bob-->>Alice: Response {i}\n"
+        ));
+        s.push_str("```\n\n");
     }
     s
 }
@@ -401,4 +443,198 @@ fn perf_document_new_overall() {
         fmt_duration(elapsed)
     );
     assert_eq!(doc.headings.len(), 500);
+}
+
+// ---------------------------------------------------------------------------
+// Mermaid: render with and without the feature
+// ---------------------------------------------------------------------------
+//
+// `DefaultMermaidRenderer` returns an error when the `mermaid` feature is
+// off (fallback path) and calls `figurehead::render` when it's on.  These
+// two tests let you compare the two code paths:
+//
+//   cargo test --test perf perf_mermaid -- --ignored --nocapture
+//   cargo test --test perf --features mermaid perf_mermaid -- --ignored --nocapture
+//
+
+#[test]
+#[ignore]
+fn perf_mermaid_flowchart_render() {
+    let renderer = DefaultMermaidRenderer;
+    let sources: Vec<String> = (0..50)
+        .map(|i| format!("graph LR\n    A[Start {i}] --> B[Mid {i}] --> C[End {i}]\n"))
+        .collect();
+
+    println!("\n=== mermaid: flowchart render (50 diagrams) ===");
+
+    let mut total = Duration::ZERO;
+    let mut ok = 0usize;
+    let mut err = 0usize;
+    for src in &sources {
+        let t0 = Instant::now();
+        let result = renderer.render(src);
+        let elapsed = t0.elapsed();
+        total += elapsed;
+        match &result {
+            Ok(out) => {
+                ok += 1;
+                if ok == 1 {
+                    println!("  sample output (first diagram):");
+                    for line in out.lines().take(5) {
+                        println!("    {line}");
+                    }
+                }
+            }
+            Err(e) => {
+                err += 1;
+                if err == 1 {
+                    println!("  first error: {e}");
+                }
+            }
+        }
+    }
+
+    println!(
+        "  {ok} ok, {err} errors, total {}, avg {}/diagram",
+        fmt_duration(total),
+        fmt_duration(total / 50)
+    );
+    println!(
+        "  (mermaid feature is {})",
+        if cfg!(feature = "mermaid") {
+            "ENABLED"
+        } else {
+            "DISABLED — diagrams fall back to code blocks"
+        }
+    );
+}
+
+#[test]
+#[ignore]
+fn perf_mermaid_sequence_render() {
+    let renderer = DefaultMermaidRenderer;
+    let sources: Vec<String> = (0..50)
+        .map(|i| {
+            format!(
+                "sequenceDiagram\n    Alice->>Bob: Request {i}\n    Bob-->>Alice: Response {i}\n"
+            )
+        })
+        .collect();
+
+    println!("\n=== mermaid: sequence render (50 diagrams) ===");
+
+    let mut total = Duration::ZERO;
+    let mut ok = 0usize;
+    let mut err = 0usize;
+    for src in &sources {
+        let t0 = Instant::now();
+        let result = renderer.render(src);
+        let elapsed = t0.elapsed();
+        total += elapsed;
+        match &result {
+            Ok(out) => {
+                ok += 1;
+                if ok == 1 {
+                    println!("  sample output (first diagram):");
+                    for line in out.lines().take(5) {
+                        println!("    {line}");
+                    }
+                }
+            }
+            Err(e) => {
+                err += 1;
+                if err == 1 {
+                    println!("  first error: {e}");
+                }
+            }
+        }
+    }
+
+    println!(
+        "  {ok} ok, {err} errors, total {}, avg {}/diagram",
+        fmt_duration(total),
+        fmt_duration(total / 50)
+    );
+}
+
+/// Compare markdown rendering with mermaid diagrams embedded.
+/// Without the feature, each ```` ```mermaid ```` block falls back to a
+/// code block + error note.  With the feature, figurehead renders each
+/// diagram to ASCII art.
+#[test]
+#[ignore]
+fn perf_mermaid_markdown_with_diagrams() {
+    println!("\n=== markdown + mermaid: full document render ===");
+    println!(
+        "  feature: {}",
+        if cfg!(feature = "mermaid") {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
+
+    // Warmup
+    let _ = render_markdown(&gen_markdown_with_mermaid(1), 80);
+
+    for &n in &[10, 50, 100] {
+        let md = gen_markdown_with_mermaid(n);
+        let chars = md.len();
+
+        let t0 = Instant::now();
+        let out = render_markdown(&md, 80);
+        let elapsed = t0.elapsed();
+
+        // Count how many lines look like rendered diagrams vs fallback code blocks.
+        let fallback_count = out
+            .lines
+            .iter()
+            .filter(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.contains("mermaid render failed"))
+            })
+            .count();
+
+        println!(
+            "  {n:>4} diagrams | {chars:>8} chars | {:>6} out_lines | {:>3} fallbacks | {} | {:.1} µs/char",
+            out.lines.len(),
+            fallback_count,
+            fmt_duration(elapsed),
+            elapsed.as_nanos() as f64 / chars as f64,
+        );
+    }
+}
+
+/// Measure the full `Document::new` pipeline (render + heading extraction)
+/// on a document packed with mermaid sequence diagrams.
+#[test]
+#[ignore]
+fn perf_mermaid_document_with_sequence() {
+    println!("\n=== Document::new with sequence diagrams ===");
+    println!(
+        "  feature: {}",
+        if cfg!(feature = "mermaid") {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
+
+    for &n in &[10, 50, 100] {
+        let md = gen_markdown_with_sequence(n);
+        let chars = md.len();
+
+        let t0 = Instant::now();
+        let doc = Document::new(&md_input(&md), 80);
+        let elapsed = t0.elapsed();
+
+        println!(
+            "  {n:>4} seq diagrams | {chars:>8} chars | {:>6} lines | {:>3} headings | {} | {:.1} µs/char",
+            doc.lines.len(),
+            doc.headings.len(),
+            fmt_duration(elapsed),
+            elapsed.as_nanos() as f64 / chars as f64,
+        );
+    }
 }
