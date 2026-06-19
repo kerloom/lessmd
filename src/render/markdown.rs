@@ -486,7 +486,7 @@ impl<'a> MdRenderer<'a> {
             }
             spans.push(Span::styled(
                 format!("┌─ {l}"),
-                Style::default().dim().fg(Color::DarkGray),
+                Style::default().fg(Color::Gray),
             ));
             self.out.push(Line::from(spans));
         }
@@ -541,8 +541,8 @@ impl<'a> MdRenderer<'a> {
             spans.push(prefix_span(&prefix, self.quote_depth, self.prefix_style()));
         }
         spans.push(Span::styled(
-            "wide mermaid diagram: use h/l or Left/Right to pan",
-            Style::default().dim().fg(Color::DarkGray),
+            "Use <-/-> or h/l to pan",
+            Style::default().fg(Color::Gray),
         ));
         self.out.push(Line::from(spans));
     }
@@ -555,7 +555,7 @@ impl<'a> MdRenderer<'a> {
         }
         spans.push(Span::styled(
             format!("mermaid render failed: {err}"),
-            Style::default().dim().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         ));
         self.out.push(Line::from(spans));
     }
@@ -1017,7 +1017,7 @@ mod tests {
         let renderer = LongMermaidRenderer;
         let lines = render_markdown_with_mermaid(md, 10, &renderer);
         let text = all_plain(&lines);
-        assert!(text.contains("wide mermaid diagram: use h/l or Left/Right to pan"));
+        assert!(text.contains("Use <-/-> or h/l to pan"));
         assert!(text.contains("0123456789abcdef"));
     }
 
