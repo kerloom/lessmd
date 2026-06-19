@@ -111,6 +111,26 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
             );
         }
     }
+    // Highlight search matches.
+    if let Some(search) = &state.search {
+        let query = &search.query;
+        let current_doc_line = search.matches.get(search.current).copied();
+        for (i, line) in lines.iter_mut().enumerate() {
+            let doc_line = state.visible_indices.get(state.offset + i).copied();
+            if let Some(dl) = doc_line
+                && search.matches.contains(&dl)
+            {
+                let is_current = current_doc_line == Some(dl);
+                let current_range = if is_current {
+                    lessmd::search::match_byte_offset(line, query)
+                        .map(|pos| (pos, pos + query.len()))
+                } else {
+                    None
+                };
+                *line = lessmd::search::highlight_line(line, query, current_range);
+            }
+        }
+    }
 
     frame.render_widget(Paragraph::new(Text::from(lines)), main);
 
@@ -191,10 +211,10 @@ fn draw_outline(frame: &mut Frame, state: &PagerState) {
         return;
     }
 
-    // Size the popup to fit the headings, capped at 80% of the screen.
-    let max_h = frame.area().height.saturating_sub(4) as usize;
+    // Size the popup to fit the headings, capped at 90% of screen height.
+    let max_h = frame.area().height.saturating_sub(2) as usize;
     let popup_h = headings.len().min(max_h).max(3) as u16;
-    let area = centered_rect(65, popup_h, frame.area());
+    let area = centered_rect(70, popup_h, frame.area());
 
     // Compute the longest heading line to size the popup width.
     let max_text_len = headings

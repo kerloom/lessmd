@@ -217,9 +217,8 @@ impl PagerState {
                 });
             }
         }
-        self.offset = self.offset.min(self.max_offset());
-        self.h_offset = self.h_offset.min(self.max_h_offset());
         self.rebuild_visible_indices();
+        self.h_offset = self.h_offset.min(self.max_h_offset());
     }
 
     // -- search --------------------------------------------------------------
