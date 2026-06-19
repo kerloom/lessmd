@@ -8,6 +8,8 @@ use crate::source::{Input, ResolvedMode};
 
 pub mod markdown;
 pub mod mermaid;
+#[cfg(feature = "syntax")]
+pub mod syntax;
 pub mod text;
 
 /// Result of rendering: the pre-wrapped lines plus any captured headings.

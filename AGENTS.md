@@ -11,9 +11,11 @@ project is built and verified. Always run these before considering a task done.
 | `cargo build --release` | Release build (LTO + strip per `Cargo.toml`) |
 | `cargo fmt --check` | Verify formatting is clean |
 | `cargo fmt` | Apply formatting |
-| `cargo clippy -- -D warnings` | Lint; warnings are errors |
+| `cargo clippy --all-targets -- -D warnings` | Lint; warnings are errors |
 | `cargo test` | Run the full test suite |
 | `cargo test --features mermaid` | Run tests including the mermaid feature (from M3) |
+| `cargo test --features syntax` | Run tests including syntax highlighting (from M5) |
+| `cargo test --features syntax,mermaid` | Run tests with both features |
 | `cargo run -- [path]` | Run the pager on a file or stdin (`-` = stdin) |
 
 ## Pre-completion checklist
@@ -21,16 +23,23 @@ project is built and verified. Always run these before considering a task done.
 Before marking any milestone task complete, all of these must pass:
 
 ```sh
-cargo fmt --check && cargo clippy -- -D warnings && cargo test
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features syntax -- -D warnings
+cargo clippy --all-targets --features mermaid -- -D warnings
+cargo clippy --all-targets --features syntax,mermaid -- -D warnings
+cargo test
+cargo test --features mermaid
+cargo test --features syntax
+cargo test --features syntax,mermaid
 ```
-
-(From M3 onward, also run `cargo test --features mermaid`.)
 
 ## Conventions
 
 - **Language:** Rust, edition 2024.
 - **Deps:** keep minimal — `ratatui`, `crossterm`, `pulldown-cmark` (M2),
-  `figurehead` behind a `mermaid` feature (M3). No clap yet (hand-rolled args).
+  `figurehead` behind a `mermaid` feature (M3), `syntect` behind a `syntax`
+  feature (M5). No clap yet (hand-rolled args).
 - **Architecture:** `PagerState` (and all pager logic) must stay pure — no
   terminal I/O outside `main.rs`. This keeps it unit-testable.
 - **Tests:** per-phase, not at the end. Each new feature gets its own unit

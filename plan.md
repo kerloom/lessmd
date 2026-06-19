@@ -258,6 +258,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | M2 — Markdown | render/markdown for all phase-1b features + per-feature tests | [x] done | 1 | pulldown-cmark 0.13; 21 unit + 7 integration markdown tests; tables/lists/blockquotes/code/inline all render |
 | M3 — Mermaid | render/mermaid + figurehead + fallback + tests | [x] done | 2 | optional `figurehead`; swappable renderer trait; valid diagrams render with `--features mermaid`; disabled/error paths fall back to code block + note; fmt/clippy/test + feature test green |
 | M4 — Polish | highlights / OSC8 / line-numbers / config (optional) | [x] done | 7 | Jump-to-heading (outline overlay `o`, `t`/`T` keys), `--line-numbers` / `-N` flag, section folding (`Tab` key with visible-line-map). OSC8 deferred (ratatui 0.30 has no hyperlink support). 129 unit + 12 integration tests green. |
+| M5 — Syntax highlighting | syntect behind `syntax` feature, highlight cache | [x] done | 9 | `syntect 5.3` with `default-fancy` (pure-Rust `fancy-regex`), `base16-ocean.dark` theme. `highlight_code()` in `src/render/syntax.rs` with `LazyLock<SyntaxSet/ThemeSet>`. Highlight cache (`HashMap<(lang, code), Vec<Line>>`, max 256 entries) so resize re-wraps instead of re-highlights (~6 µs/block vs ~150 µs/block, ~30× faster resize). 60 syntax unit tests (25 languages + aliases + cache behavior + style mapping). 2 perf tests for render + resize with cache. 192 unit + 12 integration + 14 perf green with `--features syntax`. |
 
 ### Session log
 
@@ -271,6 +272,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | 6 | 2026-06-19 | Help overlay behavior: `q`, `Q`, `Esc`, and `?` close help without quitting; help key labels use ASCII arrow notation (`v`, `^`, `<-`, `->`). fmt+clippy+test green with and without `--features mermaid`. | Optional polish: compact diagram labels or general horizontal panning for more preformatted blocks if needed. |
 | 7 | 2026-06-19 | M4 polish: heading index during markdown render (`RenderOutput` with `Vec<Heading>`); outline overlay (`o` key) with selection + jump; `t`/`T` next/prev heading navigation; `--line-numbers` / `-N` CLI flag with two-pass gutter width; section folding (`Tab` key) with `visible_indices` map, `jump_to_doc_line` auto-unfold, and `▸`/`▾` fold indicators. OSC8 deferred (ratatui 0.30 lacks hyperlink support). fmt+clippy+test green with and without `--features mermaid` (129 unit + 12 integration). | Streaming for very large files; syntax highlighting; remaining polish as needed. |
 | 8 | 2026-06-19 | Search highlighting (current match in yellow, other matches in dark gray); outline overlay height increased to 90% screen + 70% width; separate performance test suite (`tests/perf.rs` with 8 `#[ignore]` tests measuring CPU, memory expansion, scroll, search, and resize). Fixed resize bug where stale `visible_indices` caused OOB panic. fmt+clippy+test green with and without `--features mermaid` (132 unit + 12 integration + 8 perf). | Streaming for very large files; syntax highlighting; remaining polish as needed. |
+| 9 | 2026-06-19 | M5 syntax highlighting: `syntect 5.3` behind `syntax` feature (pure-Rust `fancy-regex`, `default-fancy` + `default-themes`); `src/render/syntax.rs` with `highlight_code()` using `LazyLock<SyntaxSet/ThemeSet>` and `base16-ocean.dark` theme; language alias normalization (rust→rs, python→py, typescript→js fallback, etc.); highlight cache (`HashMap<(lang, code), Vec<Line>>`, max 256 entries) so resize re-wraps instead of re-highlights (~6 µs/block vs ~150 µs/block, ~30× faster resize for code-heavy docs); `push_code_block` in `markdown.rs` uses highlighting when feature enabled, falls back to plain yellow code when disabled or language unknown. 60 syntax unit tests (25 languages + aliases + 9 cache behavior tests + style mapping). 2 perf tests for render + resize with cache. Binary: 951 KB → 2.89 MB. fmt+clippy+test green across all 4 feature combos (132/192/138/198 unit + 12 integration + 12-14 perf). | Streaming for very large files; custom syntax dump (reduce binary); remaining polish. |
 
 ### Per-task checklist (granular tracker)
 
@@ -339,10 +341,25 @@ cargo test` (add `--features mermaid` from M3 on).
 - [x] `--line-numbers` / `-N` flag with left gutter
 - [x] section folding (`Tab` key with visible-line-map)
 - [ ] OSC8 clickable hyperlinks (deferred — ratatui 0.30 has no hyperlink support)
-- [ ] syntax highlighting (evaluate dep weight first)
+- [x] syntax highlighting (moved to M5)
 - [ ] lesskey-style config file
-- [x] streaming for very large files (next session)
+- [ ] streaming for very large files (next session)
 - [x] per-feature tests added as each lands
+
+#### M5 — Syntax highlighting
+- [x] add `syntect` dep behind `[features] syntax = ["dep:syntect"]`
+- [x] `src/render/syntax.rs`: `highlight_code(code, lang)` → `Option<Vec<Line>>`
+- [x] `LazyLock<SyntaxSet>` + `LazyLock<ThemeSet>` (loaded once, reused)
+- [x] `base16-ocean.dark` theme
+- [x] language alias normalization (rust→rs, python→py, typescript→js, etc.)
+- [x] style mapping: `syntect::highlighting::Style` → `ratatui::style::Style`
+- [x] wire into `push_code_block` in `markdown.rs` (behind `#[cfg(feature = "syntax")]`)
+- [x] fall back to plain yellow code when feature disabled or language unknown
+- [x] highlight cache: `HashMap<(lang, code), Vec<Line>>` (max 256, clear on overflow)
+- [x] `clear_cache()` function for tests/document switches
+- [x] unit tests: 25 languages + aliases + 9 cache behavior tests + 3 style mapping tests
+- [x] perf tests: `perf_syntax_highlight_render` + `perf_syntax_highlight_resize_with_cache`
+- [x] verification green with `--features syntax` and `--features syntax,mermaid`
 
 ## Rough effort
 
@@ -353,3 +370,4 @@ cargo test` (add `--features mermaid` from M3 on).
 | M2 | 3–4 days |
 | M3 | 1–2 days |
 | M4 | optional |
+| M5 | 1 day |

@@ -605,7 +605,6 @@ fn perf_mermaid_markdown_with_diagrams() {
         );
     }
 }
-
 /// Measure the full `Document::new` pipeline (render + heading extraction)
 /// on a document packed with mermaid sequence diagrams.
 #[test]
@@ -635,6 +634,153 @@ fn perf_mermaid_document_with_sequence() {
             doc.headings.len(),
             fmt_duration(elapsed),
             elapsed.as_nanos() as f64 / chars as f64,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Syntax highlighting: render + resize (cache) timing
+// ---------------------------------------------------------------------------
+
+/// Generate a markdown document with N fenced code blocks of various languages.
+#[cfg(feature = "syntax")]
+fn gen_markdown_with_code_blocks(n: usize) -> String {
+    let samples: &[(&str, &str)] = &[
+        (
+            "rust",
+            "fn main() {\n    let x = 42;\n    println!(\"{}\", x);\n}\n",
+        ),
+        (
+            "python",
+            "def hello(name):\n    print(f\"Hello, {name}!\")\n    return [i*i for i in range(10)]\n",
+        ),
+        (
+            "javascript",
+            "const fib = (n) => n < 2 ? n : fib(n-1) + fib(n-2);\nconsole.log(fib(10));\n",
+        ),
+        (
+            "go",
+            "package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"hello\")\n}\n",
+        ),
+        (
+            "c",
+            "#include <stdio.h>\nint main() {\n    printf(\"hello\\n\");\n    return 0;\n}\n",
+        ),
+        (
+            "cpp",
+            "#include <iostream>\nint main() {\n    std::cout << \"hello\" << std::endl;\n    return 0;\n}\n",
+        ),
+        (
+            "java",
+            "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"hello\");\n    }\n}\n",
+        ),
+        (
+            "json",
+            "{\"key\": \"value\", \"items\": [1, 2, 3], \"nested\": {\"a\": true}}\n",
+        ),
+        (
+            "yaml",
+            "name: project\nversion: 1.0\ndependencies:\n  - foo\n  - bar\n",
+        ),
+        (
+            "html",
+            "<!DOCTYPE html>\n<html>\n  <head><title>Test</title></head>\n  <body><p>Hello</p></body>\n</html>\n",
+        ),
+        (
+            "css",
+            "body {\n  color: red;\n  margin: 0;\n  font-family: sans-serif;\n}\n",
+        ),
+        (
+            "sql",
+            "SELECT id, name, email FROM users WHERE active = 1 ORDER BY name;\n",
+        ),
+        (
+            "bash",
+            "#!/bin/bash\nNAME=\"world\"\necho \"Hello, $NAME!\"\nfor i in 1 2 3; do echo $i; done\n",
+        ),
+        (
+            "ruby",
+            "def greet(name)\n  puts \"Hello, #{name}!\"\nend\ngreet(\"world\")\n",
+        ),
+        (
+            "lua",
+            "local function factorial(n)\n  if n <= 1 then return 1 end\n  return n * factorial(n - 1)\nend\nprint(factorial(10))\n",
+        ),
+    ];
+    let mut md = String::new();
+    for i in 0..n {
+        let (lang, code) = samples[i % samples.len()];
+        md.push_str(&format!(
+            "## Section {i}\n\nSome text here.\n\n```{lang}\n{code}```\n\nMore text after.\n\n"
+        ));
+    }
+    md
+}
+
+#[test]
+#[ignore]
+#[cfg(feature = "syntax")]
+fn perf_syntax_highlight_render() {
+    println!("\n=== syntax: render with code blocks ===");
+    println!("  feature: ENABLED");
+
+    for &n in &[10, 50, 100, 500] {
+        let md = gen_markdown_with_code_blocks(n);
+        let chars = md.len();
+
+        // Warm up the syntax set (first call triggers LazyLock init).
+        if n == 10 {
+            let warmup = "```rust\nfn warmup() {}\n```";
+            let _ = lessmd::render::markdown::render_markdown(warmup, 80);
+        }
+
+        let t0 = Instant::now();
+        let out = lessmd::render::markdown::render_markdown(&md, 80);
+        let elapsed = t0.elapsed();
+
+        println!(
+            "  {:>4} blocks | {:>8} chars | {:>6} out_lines | {} | {:.1} µs/block",
+            n,
+            chars,
+            out.lines.len(),
+            fmt_duration(elapsed),
+            elapsed.as_micros() as f64 / n as f64,
+        );
+    }
+}
+
+#[test]
+#[ignore]
+#[cfg(feature = "syntax")]
+fn perf_syntax_highlight_resize_with_cache() {
+    println!("\n=== syntax: resize with cache (re-wrap, no re-highlight) ===");
+    println!("  feature: ENABLED");
+
+    for &n in &[10, 50, 100, 500] {
+        let md = gen_markdown_with_code_blocks(n);
+
+        // First render at width 80 — populates the highlight cache.
+        let _ = lessmd::render::markdown::render_markdown(&md, 80);
+
+        // Now simulate a resize: re-render at a different width.
+        // With the cache, this should skip re-highlighting and only re-wrap.
+        let widths = [120u16, 60, 100, 40];
+        let mut times = Vec::new();
+        for &w in &widths {
+            let t0 = Instant::now();
+            let _ = lessmd::render::markdown::render_markdown(&md, w);
+            let elapsed = t0.elapsed();
+            times.push(elapsed);
+        }
+
+        let avg = times.iter().sum::<Duration>() / times.len() as u32;
+        let max = *times.iter().max().unwrap();
+        println!(
+            "  {:>4} blocks | avg resize: {} | max resize: {} | {:.1} µs/block (avg)",
+            n,
+            fmt_duration(avg),
+            fmt_duration(max),
+            avg.as_micros() as f64 / n as f64,
         );
     }
 }

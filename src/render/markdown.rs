@@ -518,21 +518,49 @@ impl<'a> MdRenderer<'a> {
             self.out.push(Line::from(spans));
         }
 
-        let code_style = Style::default().fg(Color::Yellow);
-        for line in code.lines() {
-            if line.is_empty() {
-                self.out
-                    .push(prefix_line(&prefix, self.quote_depth, pfx_style));
-                continue;
+        let highlighted: Option<Vec<Line<'static>>> = {
+            #[cfg(feature = "syntax")]
+            {
+                lang.and_then(|l| {
+                    let token = l.split_whitespace().next().unwrap_or("");
+                    super::syntax::highlight_code(code, token)
+                })
             }
-            let wrapped = wrap_line(&Line::styled(line.to_owned(), code_style), avail);
-            for wl in &wrapped {
-                let mut spans = Vec::new();
-                if !prefix.is_empty() {
-                    spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
+            #[cfg(not(feature = "syntax"))]
+            {
+                None
+            }
+        };
+
+        if let Some(hl_lines) = highlighted {
+            for hl_line in &hl_lines {
+                let wrapped = wrap_line(hl_line, avail);
+                for wl in &wrapped {
+                    let mut spans = Vec::new();
+                    if !prefix.is_empty() {
+                        spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
+                    }
+                    spans.extend(wl.spans.iter().cloned());
+                    self.out.push(Line::from(spans));
                 }
-                spans.extend(wl.spans.iter().cloned());
-                self.out.push(Line::from(spans));
+            }
+        } else {
+            let code_style = Style::default().fg(Color::Yellow);
+            for line in code.lines() {
+                if line.is_empty() {
+                    self.out
+                        .push(prefix_line(&prefix, self.quote_depth, pfx_style));
+                    continue;
+                }
+                let wrapped = wrap_line(&Line::styled(line.to_owned(), code_style), avail);
+                for wl in &wrapped {
+                    let mut spans = Vec::new();
+                    if !prefix.is_empty() {
+                        spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
+                    }
+                    spans.extend(wl.spans.iter().cloned());
+                    self.out.push(Line::from(spans));
+                }
             }
         }
     }
