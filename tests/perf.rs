@@ -12,6 +12,12 @@
 //! # Only the mermaid comparison tests:
 //! cargo test --test perf perf_mermaid -- --ignored --nocapture
 //! cargo test --test perf --features mermaid perf_mermaid -- --ignored --nocapture
+//!
+//! # Syntax highlighting perf tests:
+//! cargo test --test perf --release --features syntax perf_syntax -- --ignored --nocapture
+//!
+//! # Syntax init time only:
+//! cargo test --test perf --release --features syntax perf_syntax_init_time -- --ignored --nocapture
 //! ```
 //!
 //! They measure:
@@ -19,6 +25,7 @@
 //! - **Memory**: ratio of rendered `Line` storage to input size
 //! - **Scroll**: time to slice a viewport from a large document
 //! - **Mermaid**: render timing with and without the `mermaid` feature
+//! - **Syntax**: syntect init, code-block highlighting, and resize cache timing
 //!
 //! Memory is estimated from the rendered line count and average span
 //! allocation count rather than a system allocator hook, keeping the
@@ -641,6 +648,66 @@ fn perf_mermaid_document_with_sequence() {
 // ---------------------------------------------------------------------------
 // Syntax highlighting: render + resize (cache) timing
 // ---------------------------------------------------------------------------
+
+#[test]
+#[ignore]
+#[cfg(feature = "syntax")]
+fn perf_syntax_init_time() {
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::ThemeSet;
+    use syntect::parsing::SyntaxSet;
+
+    println!("\n=== syntax: init time (syntax/theme load) ===");
+    println!("  feature: ENABLED");
+    println!(
+        "  {:>6} {:>14} {:>18} {:>14}",
+        "sample", "load", "first_highlight", "syntaxes"
+    );
+
+    let mut loads = Vec::new();
+    let mut first_highlights = Vec::new();
+
+    for i in 1..=5 {
+        let load_start = Instant::now();
+        let syntax_set = SyntaxSet::load_defaults_nonewlines();
+        let theme_set = ThemeSet::load_defaults();
+        let load_elapsed = load_start.elapsed();
+
+        let syntax = syntax_set
+            .find_syntax_by_token("rs")
+            .expect("rust syntax should exist in default syntect set");
+        let theme = theme_set
+            .themes
+            .get("base16-ocean.dark")
+            .expect("base16-ocean.dark should exist in default syntect themes");
+
+        let highlight_start = Instant::now();
+        let mut highlighter = HighlightLines::new(syntax, theme);
+        let _ = highlighter
+            .highlight_line("fn main() { println!(\"hello\"); }", &syntax_set)
+            .expect("rust highlight should succeed");
+        let highlight_elapsed = highlight_start.elapsed();
+
+        println!(
+            "  {i:>6} {:>14} {:>18} {:>14}",
+            fmt_duration(load_elapsed),
+            fmt_duration(highlight_elapsed),
+            syntax_set.syntaxes().len(),
+        );
+        loads.push(load_elapsed);
+        first_highlights.push(highlight_elapsed);
+    }
+
+    loads.sort();
+    first_highlights.sort();
+    let load_median = loads[loads.len() / 2];
+    let highlight_median = first_highlights[first_highlights.len() / 2];
+    println!(
+        "  median load: {} | median first highlight: {}",
+        fmt_duration(load_median),
+        fmt_duration(highlight_median),
+    );
+}
 
 /// Generate a markdown document with N fenced code blocks of various languages.
 #[cfg(feature = "syntax")]

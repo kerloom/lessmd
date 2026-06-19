@@ -2,6 +2,8 @@ use lessmd::cli::RenderMode;
 use lessmd::document::Document;
 use lessmd::render::markdown::render_markdown;
 use lessmd::render::text::render_text;
+#[cfg(feature = "syntax")]
+use lessmd::source::Input;
 use lessmd::source::{ResolvedMode, read};
 
 fn plain(line: &ratatui::text::Line) -> String {
@@ -126,6 +128,67 @@ fn markdown_fixture_codeblocks() {
     assert!(text.contains("rust"));
     assert!(text.contains("fn main()"));
     assert!(text.contains("let x = 42"));
+}
+
+#[cfg(feature = "syntax")]
+#[test]
+fn markdown_fixture_languages_highlights_all_blocks() {
+    let path = std::path::Path::new("tests/fixtures/languages.md");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    let doc = Document::new(&input, 200);
+    let text = all_text(&doc.lines);
+
+    // Every language section should be present in the output.
+    for marker in [
+        "fn main()",
+        "def fibonacci",
+        "const debounce",
+        "package main",
+        "#include <stdio.h>",
+        "#include <iostream>",
+        "static void Main",
+        "public class Main",
+        "\"name\": \"lessmd\"",
+        "name: lessmd",
+        "<!DOCTYPE html>",
+        "font-family:",
+        "set -euo pipefail",
+        "SELECT u.id",
+        "def fibonacci",
+        "local function factorial",
+        "use strict",
+        "function fibonacci",
+        "<?xml version",
+        "--- a/src/main.rs",
+    ] {
+        assert!(
+            text.contains(marker),
+            "expected marker '{marker}' in languages fixture output"
+        );
+    }
+
+    // At least some code lines should have syntax highlighting (colored spans).
+    let has_color = doc
+        .lines
+        .iter()
+        .any(|l| l.spans.iter().any(|s| s.style.fg.is_some()));
+    assert!(has_color, "expected at least one colored span");
+}
+
+#[cfg(feature = "syntax")]
+#[test]
+fn markdown_fixture_languages_unknown_lang_falls_back() {
+    let md = "```xyzzy\nhello world\n```\n";
+    let input = Input {
+        text: md.to_owned(),
+        render_mode: ResolvedMode::Markdown,
+        source_path: None,
+    };
+    let doc = Document::new(&input, 200);
+    let text = all_text(&doc.lines);
+    assert!(text.contains("hello world"));
+    // The unknown language label should still appear.
+    assert!(text.contains("xyzzy"));
 }
 
 #[test]
