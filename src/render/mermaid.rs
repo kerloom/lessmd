@@ -14,8 +14,58 @@ pub struct DefaultMermaidRenderer;
 #[cfg(feature = "mermaid")]
 impl MermaidRenderer for DefaultMermaidRenderer {
     fn render(&self, source: &str) -> Result<String, String> {
-        catch_mermaid_panic(|| figurehead::render(source))?.map_err(|e| e.to_string())
+        match render_with_figurehead(source) {
+            Ok(rendered) => Ok(rendered),
+            Err(first_err) => match sanitize_sequence(source) {
+                Some(sanitized) => render_with_figurehead(&sanitized).map_err(|_| first_err),
+                None => Err(first_err),
+            },
+        }
     }
+}
+
+#[cfg(feature = "mermaid")]
+fn render_with_figurehead(source: &str) -> Result<String, String> {
+    catch_mermaid_panic(|| figurehead::render(source))?.map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "mermaid")]
+fn sanitize_sequence(source: &str) -> Option<String> {
+    if !source.trim_start().starts_with("sequenceDiagram") {
+        return None;
+    }
+
+    let mut changed = false;
+    let mut out = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if is_self_message(trimmed) {
+            changed = true;
+            continue;
+        }
+
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    changed.then_some(out)
+}
+
+#[cfg(feature = "mermaid")]
+fn is_self_message(line: &str) -> bool {
+    for arrow in ["-->>", "->>", "-->", "->", "--)", "-)"] {
+        let Some(arrow_pos) = line.find(arrow) else {
+            continue;
+        };
+        let from = line[..arrow_pos].trim();
+        let rest = &line[arrow_pos + arrow.len()..];
+        let Some(colon_pos) = rest.find(':') else {
+            continue;
+        };
+        let to = rest[..colon_pos].trim();
+        return !from.is_empty() && from == to;
+    }
+    false
 }
 
 #[cfg(feature = "mermaid")]
@@ -100,5 +150,14 @@ mod tests {
     fn figurehead_panics_are_returned_as_errors() {
         let err = catch_mermaid_panic(|| std::panic::panic_any("boom")).unwrap_err();
         assert_eq!(err, "mermaid renderer panicked: boom");
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn sequence_self_messages_are_removed_before_retry() {
+        let source = "sequenceDiagram\n    A->>A: wait\n    A->>B: done";
+        let sanitized = sanitize_sequence(source).unwrap();
+        assert!(!sanitized.contains("A->>A"));
+        assert!(sanitized.contains("A->>B"));
     }
 }
