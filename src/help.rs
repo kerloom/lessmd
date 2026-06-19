@@ -13,10 +13,10 @@ pub fn help_text() -> Text<'static> {
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
     let entries: [(&str, &str); 16] = [
-        ("j / e / Down", "scroll down one line"),
-        ("k / y / Up", "scroll up one line"),
-        ("h / Left", "pan left"),
-        ("l / Right", "pan right"),
+        ("j / e / v", "scroll down one line"),
+        ("k / y / ^", "scroll up one line"),
+        ("h / <-", "pan left"),
+        ("l / ->", "pan right"),
         ("Space / f / PgDn", "scroll down one page"),
         ("b / PgUp", "scroll up one page"),
         ("Ctrl-D", "scroll down half a page"),
@@ -59,7 +59,7 @@ mod tests {
         let text = plain(&help_text());
         assert!(text.contains("?"));
         assert!(text.contains("toggle this help"));
-        assert!(text.contains("h / Left"));
-        assert!(text.contains("l / Right"));
+        assert!(text.contains("h / <-"));
+        assert!(text.contains("l / ->"));
     }
 }

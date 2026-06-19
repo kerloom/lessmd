@@ -11,6 +11,10 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         handle_search_key(state, key);
         return;
     }
+    if state.show_help {
+        handle_help_key(state, key);
+        return;
+    }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         // quit
@@ -39,6 +43,15 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Char('N') => state.prev_match(),
         // help
         KeyCode::Char('?') => state.toggle_help(),
+        _ => {}
+    }
+}
+
+fn handle_help_key(state: &mut PagerState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc | KeyCode::Char('?') => {
+            state.toggle_help()
+        }
         _ => {}
     }
 }
@@ -115,6 +128,36 @@ mod tests {
         assert!(s.show_help);
         handle_key(&mut s, key('?'));
         assert!(!s.show_help);
+    }
+
+    #[test]
+    fn q_closes_help_without_quitting() {
+        let mut s = state("abc");
+        s.show_help = true;
+
+        handle_key(&mut s, key('q'));
+        assert!(!s.show_help);
+        assert!(!s.quit);
+    }
+
+    #[test]
+    fn escape_closes_help_without_quitting() {
+        let mut s = state("abc");
+        s.show_help = true;
+
+        handle_key(&mut s, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!s.show_help);
+        assert!(!s.quit);
+    }
+
+    #[test]
+    fn uppercase_q_closes_help_without_quitting() {
+        let mut s = state("abc");
+        s.show_help = true;
+
+        handle_key(&mut s, key('Q'));
+        assert!(!s.show_help);
+        assert!(!s.quit);
     }
 
     #[test]
