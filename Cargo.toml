@@ -1,0 +1,16 @@
+[package]
+name = "lessmd"
+version = "0.1.0"
+edition = "2024"
+description = "A less-like terminal pager that renders markdown and mermaid"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.30.2"
+crossterm = "0.29.0"
+unicode-width = "0.2"
+pulldown-cmark = "0.13"
+
+[profile.release]
+lto = true
+strip = true
