@@ -20,6 +20,8 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         // movement (one line)
         KeyCode::Char('j') | KeyCode::Char('e') | KeyCode::Down => state.scroll_down(1),
         KeyCode::Char('k') | KeyCode::Char('y') | KeyCode::Up => state.scroll_up(1),
+        KeyCode::Right => state.scroll_right(8),
+        KeyCode::Left => state.scroll_left(8),
         KeyCode::Char('J') => state.scroll_down(1),
         KeyCode::Char('K') => state.scroll_up(1),
         // movement (one page)
@@ -135,6 +137,18 @@ mod tests {
             KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
         );
         assert_eq!(s.offset, 20 - 11);
+    }
+
+    #[test]
+    fn left_and_right_pan_horizontally() {
+        let mut s = state("x");
+        s.doc.lines = vec![ratatui::text::Line::raw("0123456789abcdef")];
+        s.width = 5;
+
+        handle_key(&mut s, KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(s.h_offset, 8);
+        handle_key(&mut s, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(s.h_offset, 0);
     }
 
     #[test]

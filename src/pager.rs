@@ -5,6 +5,8 @@
 //! [`PagerState::visible_lines`].
 
 use ratatui::text::Line;
+use ratatui::text::Span;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::document::Document;
 use crate::search::{SearchState, search_lines};
@@ -25,6 +27,8 @@ pub struct PagerState {
     pub doc: Document,
     /// Index of the first visible line.
     pub offset: usize,
+    /// First visible terminal cell within each rendered line.
+    pub h_offset: usize,
     /// Visible rows (terminal height minus the status bar).
     pub height: usize,
     pub width: u16,
@@ -50,6 +54,7 @@ impl PagerState {
             input,
             doc,
             offset: 0,
+            h_offset: 0,
             height: viewport,
             width: wrap_width,
             mode: Mode::Normal,
@@ -70,6 +75,14 @@ impl PagerState {
         self.doc.line_count().saturating_sub(self.height)
     }
 
+    pub fn max_h_offset(&self) -> usize {
+        self.max_line_width().saturating_sub(self.width as usize)
+    }
+
+    pub fn max_line_width(&self) -> usize {
+        self.doc.lines.iter().map(line_width).max().unwrap_or(0)
+    }
+
     /// Returns true when the viewport jumped by more than one line since
     /// `prev_offset` (e.g. Ctrl-D, Ctrl-U, PageUp/Down, g, G). The caller
     /// should force a full terminal redraw in that case to prevent stale
@@ -80,6 +93,13 @@ impl PagerState {
 
     pub fn visible_lines(&self) -> &[Line<'static>] {
         self.doc.slice(self.offset, self.height)
+    }
+
+    pub fn visible_lines_panned(&self) -> Vec<Line<'static>> {
+        self.visible_lines()
+            .iter()
+            .map(|line| clip_line(line, self.h_offset, self.width as usize))
+            .collect()
     }
 
     // -- scrolling -----------------------------------------------------------
@@ -118,6 +138,14 @@ impl PagerState {
         self.offset = self.max_offset();
     }
 
+    pub fn scroll_right(&mut self, n: usize) {
+        self.h_offset = (self.h_offset + n).min(self.max_h_offset());
+    }
+
+    pub fn scroll_left(&mut self, n: usize) {
+        self.h_offset = self.h_offset.saturating_sub(n);
+    }
+
     // -- resize --------------------------------------------------------------
 
     pub fn resize(&mut self, height: u16, width: u16) {
@@ -143,6 +171,7 @@ impl PagerState {
             }
         }
         self.offset = self.offset.min(self.max_offset());
+        self.h_offset = self.h_offset.min(self.max_h_offset());
     }
 
     // -- search --------------------------------------------------------------
@@ -231,10 +260,65 @@ impl PagerState {
     }
 }
 
+fn line_width(line: &Line<'static>) -> usize {
+    line.spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum()
+}
+
+fn clip_line(line: &Line<'static>, start: usize, width: usize) -> Line<'static> {
+    if width == 0 {
+        return Line::raw("");
+    }
+
+    let end = start + width;
+    let mut col = 0;
+    let mut spans = Vec::new();
+
+    for span in &line.spans {
+        let mut content = String::new();
+        for ch in span.content.chars() {
+            let ch_width = ch.width().unwrap_or(0);
+            let ch_end = col + ch_width;
+
+            if ch_width == 0 {
+                if col > start && col <= end && !content.is_empty() {
+                    content.push(ch);
+                }
+                continue;
+            }
+
+            if ch_end <= start {
+                col = ch_end;
+                continue;
+            }
+            if col >= end || ch_end > end {
+                col = ch_end;
+                break;
+            }
+
+            content.push(ch);
+            col = ch_end;
+        }
+
+        if !content.is_empty() {
+            spans.push(Span::styled(content, span.style));
+        }
+
+        if col >= end {
+            break;
+        }
+    }
+
+    Line::from(spans)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::source::ResolvedMode;
+    use ratatui::style::{Color, Style};
 
     fn make_state(text: &str, total_height: u16, width: u16) -> PagerState {
         let input = Input {
@@ -248,6 +332,13 @@ mod tests {
     fn doc_with_n_lines(n: usize) -> PagerState {
         let text: Vec<String> = (0..n).map(|i| format!("line {i}")).collect();
         make_state(&text.join("\n"), 10, 80)
+    }
+
+    fn plain(line: &Line<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
     }
 
     #[test]
@@ -312,6 +403,57 @@ mod tests {
         assert_eq!(s.offset, 41);
         s.goto_top();
         assert_eq!(s.offset, 0);
+    }
+
+    #[test]
+    fn scroll_right_and_left_are_clamped() {
+        let mut s = make_state("short", 10, 20);
+        s.doc.lines = vec![Line::raw("0123456789abcdef")];
+        s.width = 5;
+
+        assert_eq!(s.max_h_offset(), 11);
+        s.scroll_right(8);
+        assert_eq!(s.h_offset, 8);
+        s.scroll_right(8);
+        assert_eq!(s.h_offset, 11);
+        s.scroll_left(4);
+        assert_eq!(s.h_offset, 7);
+        s.scroll_left(100);
+        assert_eq!(s.h_offset, 0);
+    }
+
+    #[test]
+    fn visible_lines_are_clipped_by_horizontal_offset() {
+        let mut s = make_state("short", 10, 20);
+        s.doc.lines = vec![Line::raw("0123456789abcdef")];
+        s.width = 5;
+        s.h_offset = 4;
+
+        let lines = s.visible_lines_panned();
+        assert_eq!(plain(&lines[0]), "45678");
+    }
+
+    #[test]
+    fn clipping_preserves_span_style() {
+        let line = Line::from(vec![
+            Span::raw("abc"),
+            Span::styled("def", Style::default().fg(Color::Red)),
+        ]);
+
+        let clipped = clip_line(&line, 3, 2);
+        assert_eq!(plain(&clipped), "de");
+        assert_eq!(clipped.spans[0].style.fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn resize_clamps_horizontal_offset() {
+        let mut s = make_state("short", 10, 20);
+        s.doc.lines = vec![Line::raw("0123456789")];
+        s.width = 5;
+        s.h_offset = 5;
+
+        s.resize(10, 20);
+        assert_eq!(s.h_offset, 0);
     }
 
     #[test]

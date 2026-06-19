@@ -264,6 +264,8 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | Session | Date | Done this session | Next session pickup |
 |---|---|---|---|
 | 1 | 2026-06-19 | M0 skeleton; M1 plain-text pager; M2 markdown renderer (headings, inline bold/italic/code/strike, links, fenced+indented code blocks, nested lists, ordered lists, task lists, blockquotes, horizontal rules, GFM tables, images, raw HTML). fmt+clippy+test green (65 unit + 11 integration). Smoke test confirms rendering. | M3: add `figurehead` behind `mermaid` feature; `render/mermaid.rs` trait + figurehead impl + fallback; intercept ```` ```mermaid ```` blocks; per-feature tests + `fixtures/mermaid.md`. |
+| 2 | 2026-06-19 | M3 Mermaid support: optional `figurehead`, swappable renderer trait, Mermaid fenced-block interception, fallback note, fixture/tests, panic-safe renderer, and sequence self-message retry sanitizer. fmt+clippy+test green with and without `--features mermaid`. | Improve wide diagram behavior: unwrapped Mermaid output plus horizontal panning/clipping. |
+| 3 | 2026-06-19 | Wide diagram polish: Mermaid output no longer wraps, viewport clips by terminal cell, Left/Right pan horizontally, status shows `col current/max`, help updated, and tests added for clipping/style preservation/keybindings/no-wrap Mermaid. fmt+clippy+test green with and without `--features mermaid`. | Optional polish: compact diagram labels or general horizontal panning for more preformatted blocks if needed. |
 
 ### Per-task checklist (granular tracker)
 
@@ -317,15 +319,15 @@ cargo test` (add `--features mermaid` from M3 on).
 - [x] verification commands green
 
 #### M3 — Mermaid
-- [ ] add `figurehead` dep behind `[features] mermaid = ["figurehead"]`
-- [ ] `src/render/mermaid.rs`: `MermaidRenderer` trait + `FigureheadRenderer`
-- [ ] intercept ```` ```mermaid ```` in `render/markdown.rs`
-- [ ] fallback to codeblock + dim note on `Err` / unsupported type
-- [ ] tests: detection, flowchart, sequence, unsupported fallback, invalid fallback,
+- [x] add `figurehead` dep behind `[features] mermaid = ["dep:figurehead"]`
+- [x] `src/render/mermaid.rs`: `MermaidRenderer` trait + default figurehead renderer
+- [x] intercept ```` ```mermaid ```` in `render/markdown.rs`
+- [x] fallback to codeblock + dim note on `Err` / unsupported type / renderer panic
+- [x] tests: detection, flowchart, sequence, unsupported fallback, invalid fallback,
       trait swappable (mock)
-- [ ] integration fixture: `fixtures/mermaid.md` (mixed + valid + invalid)
-- [ ] manual smoke: `lessmd fixtures/mermaid.md`
-- [ ] verification green with `--features mermaid`
+- [x] integration fixture: `fixtures/mermaid.md` (mixed + valid + invalid)
+- [x] manual smoke: `lessmd fixtures/mermaid.md`
+- [x] verification green with `--features mermaid`
 
 #### M4 — Polish (optional; tick only what's in scope)
 - [ ] syntax highlighting (evaluate dep weight first)

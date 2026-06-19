@@ -512,24 +512,18 @@ impl<'a> MdRenderer<'a> {
 
     fn push_rendered_mermaid(&mut self, rendered: &str) {
         let prefix = self.cont_prefix.clone();
-        let prefix_w = width_of(&prefix);
-        let avail = self.width.saturating_sub(prefix_w).max(1);
         let pfx_style = self.prefix_style();
         let diagram_style = Style::default().fg(Color::Cyan);
 
         for line in rendered.lines() {
-            if line.is_empty() {
-                self.out
-                    .push(prefix_line(&prefix, self.quote_depth, pfx_style));
-                continue;
+            let mut spans = Vec::new();
+            if !prefix.is_empty() {
+                spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
             }
-            let wrapped = wrap_line(&Line::styled(line.to_owned(), diagram_style), avail);
-            for wl in &wrapped {
-                let mut spans = Vec::new();
-                if !prefix.is_empty() {
-                    spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
-                }
-                spans.extend(wl.spans.iter().cloned());
+            if line.is_empty() {
+                self.out.push(Line::from(spans));
+            } else {
+                spans.push(Span::styled(line.to_owned(), diagram_style));
                 self.out.push(Line::from(spans));
             }
         }
@@ -837,6 +831,14 @@ mod tests {
         }
     }
 
+    struct LongMermaidRenderer;
+
+    impl MermaidRenderer for LongMermaidRenderer {
+        fn render(&self, _source: &str) -> Result<String, String> {
+            Ok("0123456789abcdef".to_owned())
+        }
+    }
+
     fn plain(line: &Line) -> String {
         let mut s = String::new();
         for span in &line.spans {
@@ -980,6 +982,15 @@ mod tests {
         assert!(text.contains("mock diagram"));
         assert!(text.contains("Alice->>Bob: Hi"));
         assert!(text.contains("after"));
+    }
+
+    #[test]
+    fn rendered_mermaid_is_not_wrapped() {
+        let md = "```mermaid\ngraph LR\nA-->B\n```";
+        let renderer = LongMermaidRenderer;
+        let lines = render_markdown_with_mermaid(md, 10, &renderer);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(plain(&lines[0]), "0123456789abcdef");
     }
 
     #[test]

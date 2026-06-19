@@ -12,9 +12,10 @@ pub fn help_text() -> Text<'static> {
     ));
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
-    let entries: [(&str, &str); 14] = [
+    let entries: [(&str, &str); 15] = [
         ("j / e / Down", "scroll down one line"),
         ("k / y / Up", "scroll up one line"),
+        ("Left / Right", "pan horizontally"),
         ("Space / f / PgDn", "scroll down one page"),
         ("b / PgUp", "scroll up one page"),
         ("Ctrl-D", "scroll down half a page"),

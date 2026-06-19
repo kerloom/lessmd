@@ -76,7 +76,7 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
 
     frame.render_widget(
-        Paragraph::new(Text::from(state.visible_lines().to_vec())),
+        Paragraph::new(Text::from(state.visible_lines_panned())),
         main,
     );
 
@@ -104,7 +104,15 @@ fn status_line(state: &PagerState) -> Text<'static> {
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "stdin".to_owned());
-                Text::from(format!("{}  {}%", name, percentage(state)))
+                let mut status = format!("{}  {}%", name, percentage(state));
+                if state.max_h_offset() > 0 {
+                    status.push_str(&format!(
+                        "  col {}/{}",
+                        state.h_offset + 1,
+                        state.max_line_width()
+                    ));
+                }
+                Text::from(status)
             }
         }
     }
