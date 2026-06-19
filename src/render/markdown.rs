@@ -512,8 +512,13 @@ impl<'a> MdRenderer<'a> {
 
     fn push_rendered_mermaid(&mut self, rendered: &str) {
         let prefix = self.cont_prefix.clone();
+        let avail = self.width.saturating_sub(width_of(&prefix)).max(1);
         let pfx_style = self.prefix_style();
         let diagram_style = Style::default().fg(Color::Cyan);
+
+        if rendered.lines().any(|line| width_of(line) > avail) {
+            self.push_mermaid_pan_hint();
+        }
 
         for line in rendered.lines() {
             let mut spans = Vec::new();
@@ -527,6 +532,19 @@ impl<'a> MdRenderer<'a> {
                 self.out.push(Line::from(spans));
             }
         }
+    }
+
+    fn push_mermaid_pan_hint(&mut self) {
+        let prefix = self.cont_prefix.clone();
+        let mut spans = Vec::new();
+        if !prefix.is_empty() {
+            spans.push(prefix_span(&prefix, self.quote_depth, self.prefix_style()));
+        }
+        spans.push(Span::styled(
+            "wide mermaid diagram: use h/l or Left/Right to pan",
+            Style::default().dim().fg(Color::DarkGray),
+        ));
+        self.out.push(Line::from(spans));
     }
 
     fn push_mermaid_note(&mut self, err: &str) {
@@ -988,9 +1006,19 @@ mod tests {
     fn rendered_mermaid_is_not_wrapped() {
         let md = "```mermaid\ngraph LR\nA-->B\n```";
         let renderer = LongMermaidRenderer;
-        let lines = render_markdown_with_mermaid(md, 10, &renderer);
+        let lines = render_markdown_with_mermaid(md, 80, &renderer);
         assert_eq!(lines.len(), 1);
         assert_eq!(plain(&lines[0]), "0123456789abcdef");
+    }
+
+    #[test]
+    fn wide_rendered_mermaid_gets_horizontal_scroll_hint() {
+        let md = "```mermaid\ngraph LR\nA-->B\n```";
+        let renderer = LongMermaidRenderer;
+        let lines = render_markdown_with_mermaid(md, 10, &renderer);
+        let text = all_plain(&lines);
+        assert!(text.contains("wide mermaid diagram: use h/l or Left/Right to pan"));
+        assert!(text.contains("0123456789abcdef"));
     }
 
     #[test]
