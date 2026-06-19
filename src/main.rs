@@ -9,8 +9,8 @@ use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
-    text::Text,
+    style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
@@ -112,7 +112,15 @@ fn status_line(state: &PagerState) -> Text<'static> {
                         state.max_line_width()
                     ));
                 }
-                Text::from(status)
+                Text::from(Line::from(vec![
+                    Span::raw(status),
+                    Span::styled(
+                        "  ? help",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]))
             }
         }
     }

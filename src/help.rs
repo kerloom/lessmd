@@ -12,10 +12,11 @@ pub fn help_text() -> Text<'static> {
     ));
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
-    let entries: [(&str, &str); 15] = [
+    let entries: [(&str, &str); 16] = [
         ("j / e / Down", "scroll down one line"),
         ("k / y / Up", "scroll up one line"),
-        ("Left / Right", "pan horizontally"),
+        ("h / Left", "pan left"),
+        ("l / Right", "pan right"),
         ("Space / f / PgDn", "scroll down one page"),
         ("b / PgUp", "scroll up one page"),
         ("Ctrl-D", "scroll down half a page"),
@@ -26,7 +27,7 @@ pub fn help_text() -> Text<'static> {
         ("n", "next match"),
         ("N", "previous match"),
         ("Ctrl-C", "abort search"),
-        ("h / H", "toggle this help"),
+        ("?", "toggle this help"),
         ("q / Q / Esc", "quit"),
     ];
 
@@ -38,4 +39,27 @@ pub fn help_text() -> Text<'static> {
     }
 
     Text::from(lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain(text: &Text<'static>) -> String {
+        text.lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn help_lists_question_mark_and_horizontal_pan_keys() {
+        let text = plain(&help_text());
+        assert!(text.contains("?"));
+        assert!(text.contains("toggle this help"));
+        assert!(text.contains("h / Left"));
+        assert!(text.contains("l / Right"));
+    }
 }
