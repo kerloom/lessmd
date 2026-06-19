@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub struct Args {
     pub path: Option<PathBuf>,
     pub mode: RenderMode,
+    pub line_numbers: bool,
     pub show_help: bool,
     pub show_version: bool,
 }
@@ -29,27 +30,34 @@ Usage:
   lessmd [OPTIONS] -         (read from stdin)
 
 Options:
-  --markdown      Force markdown rendering (ignore file extension).
-  --plain         Force plain-text rendering and strip ANSI colors.
-  -h, --help      Show this help text and exit.
-  -V, --version   Show version and exit.
+  --markdown        Force markdown rendering (ignore file extension).
+  --plain           Force plain-text rendering and strip ANSI colors.
+  -N, --line-numbers  Show line numbers in a left gutter.
+  -h, --help        Show this help text and exit.
+  -V, --version     Show version and exit.
 
 When FILE is omitted or '-', lessmd reads from stdin.
 
 Keybindings (inside the pager):
-  j / e / Ctrl-N / Down    scroll down one line
-  k / y / Ctrl-P / Up      scroll up one line
+  j / e / Down             scroll down one line
+  k / y / Up               scroll up one line
+  h / Left                 pan left
+  l / Right                pan right
   Space / f / PageDown     scroll down one page
   b / PageUp               scroll up one page
   Ctrl-D                   scroll down half a page
   Ctrl-U                   scroll up half a page
   g / Home                 go to top
   G / End                  go to bottom
+  t                        next heading
+  T                        previous heading
+  o                        toggle outline (jump to heading)
+  Tab                      toggle fold on heading
   /                        start search
   n                        next search match
   N                        previous search match
   Ctrl-C                   abort search
-  h / H                    toggle help
+  ?                        toggle help
   q / Q / Esc              quit
 ";
 
@@ -69,6 +77,7 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
         match arg.as_str() {
             "--markdown" => out.mode = RenderMode::Markdown,
             "--plain" => out.mode = RenderMode::Plain,
+            "-N" | "--line-numbers" => out.line_numbers = true,
             "-h" | "--help" => out.show_help = true,
             "-V" | "--version" => out.show_version = true,
             "--" => only_positional = true,
@@ -127,6 +136,13 @@ mod tests {
     fn markdown_and_plain_flags() {
         assert_eq!(parse_args(&["--markdown", "x"]).mode, RenderMode::Markdown);
         assert_eq!(parse_args(&["--plain", "x"]).mode, RenderMode::Plain);
+    }
+
+    #[test]
+    fn line_numbers_flag() {
+        assert!(parse_args(&["-N", "x"]).line_numbers);
+        assert!(parse_args(&["--line-numbers", "x"]).line_numbers);
+        assert!(!parse_args(&["x"]).line_numbers);
     }
 
     #[test]

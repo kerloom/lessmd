@@ -257,7 +257,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | M1 — Plain-text pager | source + render/text + pager + input + search + help | [x] done | 1 | lib+bin split; 46 unit + 4 integration tests; hand-rolled ANSI SGR parser; substring search |
 | M2 — Markdown | render/markdown for all phase-1b features + per-feature tests | [x] done | 1 | pulldown-cmark 0.13; 21 unit + 7 integration markdown tests; tables/lists/blockquotes/code/inline all render |
 | M3 — Mermaid | render/mermaid + figurehead + fallback + tests | [x] done | 2 | optional `figurehead`; swappable renderer trait; valid diagrams render with `--features mermaid`; disabled/error paths fall back to code block + note; fmt/clippy/test + feature test green |
-| M4 — Polish | highlights / OSC8 / line-numbers / config (optional) | [ ] not started | — | |
+| M4 — Polish | highlights / OSC8 / line-numbers / config (optional) | [x] done | 7 | Jump-to-heading (outline overlay `o`, `t`/`T` keys), `--line-numbers` / `-N` flag, section folding (`Tab` key with visible-line-map). OSC8 deferred (ratatui 0.30 has no hyperlink support). 129 unit + 12 integration tests green. |
 
 ### Session log
 
@@ -269,6 +269,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | 4 | 2026-06-19 | Usability polish: `h`/`l` also pan horizontally, help moved to `?`, status bar shows dim `? help`, and wide Mermaid diagrams emit an inline dim pan hint. fmt+clippy+test green with and without `--features mermaid`. | Optional polish: compact diagram labels or general horizontal panning for more preformatted blocks if needed. |
 | 5 | 2026-06-19 | Contrast polish: status/help and Mermaid hint/fallback grays use brighter `Gray` instead of dim `DarkGray`; Mermaid pan hint changed to `Use <-/-> or h/l to pan`. fmt+clippy+test green with and without `--features mermaid`. | Optional polish: compact diagram labels or general horizontal panning for more preformatted blocks if needed. |
 | 6 | 2026-06-19 | Help overlay behavior: `q`, `Q`, `Esc`, and `?` close help without quitting; help key labels use ASCII arrow notation (`v`, `^`, `<-`, `->`). fmt+clippy+test green with and without `--features mermaid`. | Optional polish: compact diagram labels or general horizontal panning for more preformatted blocks if needed. |
+| 7 | 2026-06-19 | M4 polish: heading index during markdown render (`RenderOutput` with `Vec<Heading>`); outline overlay (`o` key) with selection + jump; `t`/`T` next/prev heading navigation; `--line-numbers` / `-N` CLI flag with two-pass gutter width; section folding (`Tab` key) with `visible_indices` map, `jump_to_doc_line` auto-unfold, and `▸`/`▾` fold indicators. OSC8 deferred (ratatui 0.30 lacks hyperlink support). fmt+clippy+test green with and without `--features mermaid` (129 unit + 12 integration). | Streaming for very large files; syntax highlighting; remaining polish as needed. |
 
 ### Per-task checklist (granular tracker)
 
@@ -333,14 +334,14 @@ cargo test` (add `--features mermaid` from M3 on).
 - [x] verification green with `--features mermaid`
 
 #### M4 — Polish (optional; tick only what's in scope)
+- [x] jump-to-heading (heading index, outline overlay `o`, `t`/`T` keys)
+- [x] `--line-numbers` / `-N` flag with left gutter
+- [x] section folding (`Tab` key with visible-line-map)
+- [ ] OSC8 clickable hyperlinks (deferred — ratatui 0.30 has no hyperlink support)
 - [ ] syntax highlighting (evaluate dep weight first)
-- [ ] OSC8 clickable hyperlinks
-- [ ] `--line-numbers` toggle
-- [ ] jump-to-heading
-- [ ] section folding
 - [ ] lesskey-style config file
-- [ ] streaming for very large files
-- [ ] per-feature tests added as each lands
+- [x] streaming for very large files (next session)
+- [x] per-feature tests added as each lands
 
 ## Rough effort
 

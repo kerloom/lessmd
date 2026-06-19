@@ -20,7 +20,7 @@ fn all_text(lines: &[ratatui::text::Line]) -> String {
 
 #[test]
 fn plain_text_renders_line_count_and_content() {
-    let lines = render_text("line one\nline two\nline three\n", 80, false);
+    let lines = render_text("line one\nline two\nline three\n", 80, false).lines;
     assert_eq!(lines.len(), 3);
     assert_eq!(plain(&lines[0]), "line one");
     assert_eq!(plain(&lines[2]), "line three");
@@ -132,7 +132,7 @@ fn markdown_fixture_codeblocks() {
 fn markdown_renders_via_render_module() {
     // The render dispatcher must route markdown mode to the markdown renderer.
     let md = "# Hello\n\nSome **bold** text.";
-    let lines = render_markdown(md, 80);
+    let lines = render_markdown(md, 80).lines;
     let text = all_text(&lines);
     assert!(text.contains("Hello"));
     assert!(text.contains("bold"));

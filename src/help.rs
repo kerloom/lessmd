@@ -12,7 +12,7 @@ pub fn help_text() -> Text<'static> {
     ));
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
-    let entries: [(&str, &str); 16] = [
+    let entries: [(&str, &str); 20] = [
         ("j / e / v", "scroll down one line"),
         ("k / y / ^", "scroll up one line"),
         ("h / <-", "pan left"),
@@ -23,6 +23,10 @@ pub fn help_text() -> Text<'static> {
         ("Ctrl-U", "scroll up half a page"),
         ("g / Home", "go to top"),
         ("G / End", "go to bottom"),
+        ("t", "next heading"),
+        ("T", "previous heading"),
+        ("o", "toggle outline (jump to heading)"),
+        ("Tab", "toggle fold on heading"),
         ("/", "start search"),
         ("n", "next match"),
         ("N", "previous match"),
@@ -61,5 +65,9 @@ mod tests {
         assert!(text.contains("toggle this help"));
         assert!(text.contains("h / <-"));
         assert!(text.contains("l / ->"));
+        assert!(text.contains("outline"));
+        assert!(text.contains("next heading"));
+        assert!(text.contains("Tab"));
+        assert!(text.contains("toggle fold"));
     }
 }

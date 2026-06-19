@@ -7,14 +7,17 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use super::RenderOutput;
+
 /// Render `text` into a flat list of terminal lines, each wrapped to `width`.
 ///
 /// When `ansi` is true, CSI SGR sequences (`\x1b[...m`) are interpreted as
 /// ratatui styles; other escape sequences (OSC, bare ESC) are stripped.
 /// When `ansi` is false, all escape sequences are stripped.
-pub fn render_text(text: &str, width: u16, ansi: bool) -> Vec<Line<'static>> {
+pub fn render_text(text: &str, width: u16, ansi: bool) -> RenderOutput {
     let width = width.max(1) as usize;
-    text.lines()
+    let lines: Vec<Line<'static>> = text
+        .lines()
         .flat_map(|raw| {
             let line = if ansi {
                 parse_ansi_line(raw)
@@ -23,7 +26,11 @@ pub fn render_text(text: &str, width: u16, ansi: bool) -> Vec<Line<'static>> {
             };
             wrap_line(&line, width)
         })
-        .collect()
+        .collect();
+    RenderOutput {
+        lines,
+        headings: Vec::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +337,7 @@ mod tests {
 
     #[test]
     fn wraps_long_line_to_width() {
-        let lines = render_text("aaaaaaaaaa", 4, false);
+        let lines = render_text("aaaaaaaaaa", 4, false).lines;
         assert_eq!(lines.len(), 3);
         assert_eq!(plain(&lines[0]), "aaaa");
         assert_eq!(plain(&lines[1]), "aaaa");
@@ -339,7 +346,7 @@ mod tests {
 
     #[test]
     fn ansi_passthrough_preserves_color() {
-        let lines = render_text("\x1b[31mred\x1b[0m", 80, true);
+        let lines = render_text("\x1b[31mred\x1b[0m", 80, true).lines;
         assert_eq!(lines.len(), 1);
         assert_eq!(plain(&lines[0]), "red");
         assert_eq!(lines[0].spans[0].style.fg, Some(Color::Red));
@@ -347,7 +354,7 @@ mod tests {
 
     #[test]
     fn ansi_passthrough_preserves_bold_and_underline() {
-        let lines = render_text("\x1b[1mbold\x1b[22m \x1b[4mu\x1b[24m", 80, true);
+        let lines = render_text("\x1b[1mbold\x1b[22m \x1b[4mu\x1b[24m", 80, true).lines;
         assert_eq!(plain(&lines[0]), "bold u");
         assert!(
             lines[0].spans[0]
@@ -359,7 +366,7 @@ mod tests {
 
     #[test]
     fn ansi_stripped_in_plain_mode() {
-        let lines = render_text("\x1b[31mred\x1b[0m", 80, false);
+        let lines = render_text("\x1b[31mred\x1b[0m", 80, false).lines;
         assert_eq!(lines.len(), 1);
         assert_eq!(plain(&lines[0]), "red");
         assert_eq!(lines[0].spans[0].style.fg, None);
@@ -368,25 +375,25 @@ mod tests {
     #[test]
     fn osc_sequences_stripped_in_ansi_mode() {
         // OSC 8 hyperlink wrapper — text inside must survive, escapes stripped.
-        let lines = render_text("\x1b]8;;https://example.com\x07link\x1b]8;;\x07", 80, true);
+        let lines = render_text("\x1b]8;;https://example.com\x07link\x1b]8;;\x07", 80, true).lines;
         assert_eq!(plain(&lines[0]), "link");
     }
 
     #[test]
     fn truecolor_parsed() {
-        let lines = render_text("\x1b[38;2;10;20;30mx\x1b[0m", 80, true);
+        let lines = render_text("\x1b[38;2;10;20;30mx\x1b[0m", 80, true).lines;
         assert_eq!(lines[0].spans[0].style.fg, Some(Color::Rgb(10, 20, 30)));
     }
 
     #[test]
     fn empty_input_yields_no_lines() {
-        let lines = render_text("", 80, false);
+        let lines = render_text("", 80, false).lines;
         assert!(lines.is_empty());
     }
 
     #[test]
     fn multiple_lines_preserved() {
-        let lines = render_text("a\nb\nc", 80, false);
+        let lines = render_text("a\nb\nc", 80, false).lines;
         assert_eq!(lines.len(), 3);
         assert_eq!(plain(&lines[0]), "a");
         assert_eq!(plain(&lines[2]), "c");
@@ -394,7 +401,7 @@ mod tests {
 
     #[test]
     fn crlf_split_into_single_line() {
-        let lines = render_text("a\r\nb", 80, false);
+        let lines = render_text("a\r\nb", 80, false).lines;
         assert_eq!(lines.len(), 2);
         assert_eq!(plain(&lines[0]), "a");
         assert_eq!(plain(&lines[1]), "b");
@@ -403,7 +410,7 @@ mod tests {
     #[test]
     fn zero_width_char_makes_progress() {
         // combining acute accent (U+0301) is zero-width; must not loop forever
-        let lines = render_text("e\u{0301}", 1, false);
+        let lines = render_text("e\u{0301}", 1, false).lines;
         assert_eq!(lines.len(), 1);
         assert_eq!(plain(&lines[0]), "e\u{0301}");
     }

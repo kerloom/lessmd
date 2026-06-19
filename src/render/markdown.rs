@@ -12,11 +12,13 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use super::RenderOutput;
 use super::mermaid::{DefaultMermaidRenderer, MermaidRenderer};
 use super::text::wrap_line;
+use crate::document::Heading;
 
 /// Render markdown `text` into a flat list of terminal lines wrapped to `width`.
-pub fn render_markdown(text: &str, width: u16) -> Vec<Line<'static>> {
+pub fn render_markdown(text: &str, width: u16) -> RenderOutput {
     let renderer = DefaultMermaidRenderer;
     render_markdown_with_mermaid(text, width, &renderer)
 }
@@ -26,7 +28,7 @@ pub fn render_markdown_with_mermaid(
     text: &str,
     width: u16,
     mermaid: &dyn MermaidRenderer,
-) -> Vec<Line<'static>> {
+) -> RenderOutput {
     let opts = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
@@ -37,7 +39,7 @@ pub fn render_markdown_with_mermaid(
         r.handle(event);
     }
     r.finish();
-    r.into_lines()
+    r.into_output()
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,10 @@ struct MdRenderer<'a> {
     table: Option<TableBuilder>,
     cell_buf: String,
     in_cell: bool,
+    /// Headings captured during rendering for the outline / jump-to-heading.
+    headings: Vec<Heading>,
+    /// `Some(level)` while inside a heading; `None` otherwise.
+    pending_heading: Option<HeadingLevel>,
 }
 
 impl<'a> MdRenderer<'a> {
@@ -109,11 +115,16 @@ impl<'a> MdRenderer<'a> {
             table: None,
             cell_buf: String::new(),
             in_cell: false,
+            headings: Vec::new(),
+            pending_heading: None,
         }
     }
 
-    fn into_lines(self) -> Vec<Line<'static>> {
-        self.out
+    fn into_output(self) -> RenderOutput {
+        RenderOutput {
+            lines: self.out,
+            headings: self.headings,
+        }
     }
 
     // -- dispatch ------------------------------------------------------------
@@ -150,6 +161,7 @@ impl<'a> MdRenderer<'a> {
             Tag::Heading { level, .. } => {
                 self.block_style = heading_style(level);
                 self.pending.clear();
+                self.pending_heading = Some(level);
             }
             Tag::BlockQuote(_) => {
                 self.quote_depth += 1;
@@ -211,6 +223,21 @@ impl<'a> MdRenderer<'a> {
                 self.push_blank();
             }
             TagEnd::Heading(_) => {
+                if let Some(level) = self.pending_heading.take() {
+                    let text: String = self
+                        .pending
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>()
+                        .trim()
+                        .to_owned();
+                    let line = self.out.len();
+                    self.headings.push(Heading {
+                        level: level as u8,
+                        text,
+                        line,
+                    });
+                }
                 self.flush();
                 self.push_blank();
             }
@@ -866,7 +893,7 @@ mod tests {
     }
 
     fn render(md: &str) -> Vec<Line<'static>> {
-        render_markdown(md, 80)
+        render_markdown(md, 80).lines
     }
 
     fn all_plain(lines: &[Line]) -> String {
@@ -983,7 +1010,7 @@ mod tests {
     fn detects_mermaid_fenced_block() {
         let md = "```mermaid\ngraph LR\nA-->B\n```";
         let renderer = OkMermaidRenderer;
-        let lines = render_markdown_with_mermaid(md, 80, &renderer);
+        let lines = render_markdown_with_mermaid(md, 80, &renderer).lines;
         let text = all_plain(&lines);
         assert!(text.contains("mock diagram"));
         assert!(text.contains("A-->B"));
@@ -994,7 +1021,7 @@ mod tests {
     fn mermaid_renderer_trait_is_used_by_markdown_renderer() {
         let md = "before\n\n```mermaid\nsequenceDiagram\nAlice->>Bob: Hi\n```\n\nafter";
         let renderer = OkMermaidRenderer;
-        let lines = render_markdown_with_mermaid(md, 80, &renderer);
+        let lines = render_markdown_with_mermaid(md, 80, &renderer).lines;
         let text = all_plain(&lines);
         assert!(text.contains("before"));
         assert!(text.contains("mock diagram"));
@@ -1006,7 +1033,7 @@ mod tests {
     fn rendered_mermaid_is_not_wrapped() {
         let md = "```mermaid\ngraph LR\nA-->B\n```";
         let renderer = LongMermaidRenderer;
-        let lines = render_markdown_with_mermaid(md, 80, &renderer);
+        let lines = render_markdown_with_mermaid(md, 80, &renderer).lines;
         assert_eq!(lines.len(), 1);
         assert_eq!(plain(&lines[0]), "0123456789abcdef");
     }
@@ -1015,7 +1042,7 @@ mod tests {
     fn wide_rendered_mermaid_gets_horizontal_scroll_hint() {
         let md = "```mermaid\ngraph LR\nA-->B\n```";
         let renderer = LongMermaidRenderer;
-        let lines = render_markdown_with_mermaid(md, 10, &renderer);
+        let lines = render_markdown_with_mermaid(md, 10, &renderer).lines;
         let text = all_plain(&lines);
         assert!(text.contains("Use <-/-> or h/l to pan"));
         assert!(text.contains("0123456789abcdef"));
@@ -1025,7 +1052,7 @@ mod tests {
     fn renders_unsupported_diagram_as_codeblock_fallback() {
         let md = "```mermaid\nunknownDiagram\nA-->B\n```";
         let renderer = ErrMermaidRenderer;
-        let lines = render_markdown_with_mermaid(md, 80, &renderer);
+        let lines = render_markdown_with_mermaid(md, 80, &renderer).lines;
         let text = all_plain(&lines);
         assert!(text.contains("┌─ mermaid"));
         assert!(text.contains("unknownDiagram"));
@@ -1036,7 +1063,7 @@ mod tests {
     #[test]
     fn renders_invalid_mermaid_as_codeblock_fallback() {
         let md = "```mermaid\nnot a diagram\n```";
-        let lines = render_markdown(md, 80);
+        let lines = render_markdown(md, 80).lines;
         let text = all_plain(&lines);
         assert!(text.contains("┌─ mermaid"));
         assert!(text.contains("not a diagram"));
@@ -1047,7 +1074,7 @@ mod tests {
     #[test]
     fn problematic_sequence_diagram_does_not_panic() {
         let md = "```mermaid\nsequenceDiagram\n    autonumber\n    actor U as Operator (Atlas-Webapp)\n    participant API as DisbursementController\n    participant DB as Atlas DB<br/>(Disbursement schema)\n    participant HF as Hangfire<br/>(SQL-backed)\n    participant W as DisbursementProcessor<br/>(Hangfire job)\n    participant WL as WorldLink (Citi)\n\n    Note over U,WL: Trigger — returns 202 immediately\n    U->>API: POST /api/disbursement/{id}/initiate-international\n    API->>DB: UPDATE Batch.Status=processing<br/>UPDATE EmployeeDisbursement.Status=queued (N rows)\n    API->>HF: BackgroundJob.Enqueue ProcessBatchAsync(batchId)\n    HF-->>API: hangfireJobId\n    API-->>U: 202 { batchId, hangfireJobId }\n\n    loop for each chunk of 5 (SemaphoreSlim)\n        par employee 1..5 in parallel\n            W->>WL: POST payment/initiation (per-employee pain.001)\n            WL-->>W: 200 paymentId / 4xx validation / 5xx transient\n            alt success\n                Note right of W: Status=submitted\n            else 4xx validation\n                Note right of W: Status=failed_validation (no retry)\n            else 408/429/5xx/network\n                Note right of W: Polly retries 3x w/ backoff<br/>then Status=failed_transient\n            end\n        end\n        W->>W: Task.Delay(1000) pacing\n    end\n```";
-        let lines = render_markdown(md, 120);
+        let lines = render_markdown(md, 120).lines;
         let text = all_plain(&lines);
         assert!(text.contains("Operator"));
         assert!(!text.contains("mermaid render failed:"));
@@ -1129,7 +1156,7 @@ mod tests {
     fn wide_table_fits_within_viewport() {
         // A 4-column table with very long content — must fit within 60 chars.
         let md = "| aaaa | bbbb | cccc | dddd |\n| --- | --- | --- | --- |\n| verylongcontenthere | moreverylongcontent | evenlongercontenthere | yetanotherlongcontent |";
-        let lines = render_markdown(md, 60);
+        let lines = render_markdown(md, 60).lines;
         for l in &lines {
             let w = width_of(&plain(l));
             assert!(w <= 60, "table line {} chars > 60: [{}]", w, plain(l));
@@ -1139,7 +1166,7 @@ mod tests {
     #[test]
     fn wide_table_truncates_with_ellipsis() {
         let md = "| short | averyveryveryverylongcell |\n| --- | --- |\n| x | y |";
-        let lines = render_markdown(md, 30);
+        let lines = render_markdown(md, 30).lines;
         let text = all_plain(&lines);
         // The long cell should be truncated (contains ellipsis somewhere)
         assert!(
@@ -1154,7 +1181,7 @@ mod tests {
         // but width 1 if summed per-char. Tables must use str-level width
         // so cells with emoji don't overflow the column.
         let md = "| a | b |\n| --- | --- |\n| ⚠️ warning | ✅ ok |";
-        let lines = render_markdown(md, 30);
+        let lines = render_markdown(md, 30).lines;
         for l in &lines {
             let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
             let w = unicode_width::UnicodeWidthStr::width(s.as_str());
@@ -1167,7 +1194,7 @@ mod tests {
         // Regression: link URL was orphaned outside the table because
         // End(Link) always pushed to self.pending instead of self.cell_buf.
         let md = "| name | link |\n| --- | --- |\n| alice | [home](https://example.com) |";
-        let lines = render_markdown(md, 200);
+        let lines = render_markdown(md, 200).lines;
         let text = all_plain(&lines);
         // URL must appear inside the table, not as a stray line after it.
         assert!(text.contains("https://example.com"));
@@ -1214,8 +1241,33 @@ mod tests {
     }
 
     #[test]
+    fn heading_index_captures_levels_and_text() {
+        let md = "# Title\n\n## Sub\n\n### Deep\n\nText\n\n# Another";
+        let out = render_markdown(md, 80);
+        assert_eq!(out.headings.len(), 4);
+        assert_eq!(out.headings[0].level, 1);
+        assert_eq!(out.headings[0].text, "Title");
+        assert_eq!(out.headings[1].level, 2);
+        assert_eq!(out.headings[1].text, "Sub");
+        assert_eq!(out.headings[2].level, 3);
+        assert_eq!(out.headings[2].text, "Deep");
+        assert_eq!(out.headings[3].level, 1);
+        assert_eq!(out.headings[3].text, "Another");
+        // Heading line indices must point to the heading's first row.
+        assert_eq!(plain(&out.lines[out.headings[0].line]), "Title");
+        assert_eq!(plain(&out.lines[out.headings[1].line]), "Sub");
+    }
+
+    #[test]
+    fn heading_index_is_empty_for_plain_text() {
+        use crate::render::text::render_text;
+        let out = render_text("not a heading\n\n## not either", 80, false);
+        assert!(out.headings.is_empty());
+    }
+
+    #[test]
     fn paragraph_wraps_at_narrow_width() {
-        let lines = render_markdown("hello world foo bar baz", 10);
+        let lines = render_markdown("hello world foo bar baz", 10).lines;
         // wrapped into multiple lines, none wider than 10
         for l in &lines {
             assert!(width_of(&plain(l)) <= 10, "line too wide: {:?}", plain(l));

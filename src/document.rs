@@ -7,18 +7,32 @@ use ratatui::text::Line;
 use crate::render;
 use crate::source::Input;
 
+/// A heading captured during markdown rendering, used for the outline
+/// overlay and jump-to-heading navigation.
+#[derive(Debug, Clone)]
+pub struct Heading {
+    /// Heading level (1–6).
+    pub level: u8,
+    /// Plain-text heading content.
+    pub text: String,
+    /// Index into [`Document::lines`] where the heading's first row lives.
+    pub line: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Document {
     pub lines: Vec<Line<'static>>,
+    pub headings: Vec<Heading>,
     pub source_path: Option<PathBuf>,
 }
 
 impl Document {
     /// Render the whole `input` up-front, wrapped to `width`.
     pub fn new(input: &Input, width: u16) -> Self {
-        let lines = render::render(input, width);
+        let output = render::render(input, width);
         Self {
-            lines,
+            lines: output.lines,
+            headings: output.headings,
             source_path: input.source_path.clone(),
         }
     }

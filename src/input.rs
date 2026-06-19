@@ -15,6 +15,10 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         handle_help_key(state, key);
         return;
     }
+    if state.show_outline {
+        handle_outline_key(state, key);
+        return;
+    }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         // quit
@@ -37,6 +41,12 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         // jump
         KeyCode::Char('g') | KeyCode::Home => state.goto_top(),
         KeyCode::Char('G') | KeyCode::End => state.goto_bottom(),
+        // heading navigation
+        KeyCode::Char('t') => state.next_heading(),
+        KeyCode::Char('T') => state.prev_heading(),
+        KeyCode::Char('o') => state.toggle_outline(),
+        // folding
+        KeyCode::Tab => state.toggle_fold(),
         // search
         KeyCode::Char('/') => state.start_search(),
         KeyCode::Char('n') => state.next_match(),
@@ -51,6 +61,20 @@ fn handle_help_key(state: &mut PagerState, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc | KeyCode::Char('?') => {
             state.toggle_help()
+        }
+        _ => {}
+    }
+}
+
+/// While the outline overlay is showing, j/k/arrows move the selection,
+/// Enter jumps, and Esc/q/o close without jumping.
+fn handle_outline_key(state: &mut PagerState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => state.outline_next(),
+        KeyCode::Char('k') | KeyCode::Up => state.outline_prev(),
+        KeyCode::Enter => state.outline_jump(),
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Char('o') => {
+            state.show_outline = false;
         }
         _ => {}
     }
@@ -84,6 +108,7 @@ mod tests {
             },
             24,
             80,
+            false,
         )
     }
 
@@ -228,5 +253,85 @@ mod tests {
         handle_key(&mut s, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(s.mode, Mode::Normal);
         assert_eq!(s.search.as_ref().unwrap().matches.len(), 2);
+    }
+
+    fn md_state(md: &str) -> PagerState {
+        PagerState::new(
+            Input {
+                text: md.to_owned(),
+                render_mode: ResolvedMode::Markdown,
+                source_path: None,
+            },
+            2,
+            80,
+            false,
+        )
+    }
+
+    #[test]
+    fn o_toggles_outline() {
+        let mut s = md_state("# A\n\n## B\n");
+        handle_key(&mut s, key('o'));
+        assert!(s.show_outline);
+        handle_key(&mut s, key('o'));
+        assert!(!s.show_outline);
+    }
+
+    #[test]
+    fn t_jumps_to_next_heading() {
+        let mut s = md_state("# A\n\ntext\n\n## B\n");
+        assert_eq!(s.offset, 0);
+        handle_key(&mut s, key('t'));
+        assert_eq!(s.offset, s.doc.headings[1].line);
+    }
+
+    #[test]
+    fn t_jumps_to_prev_heading() {
+        let mut s = md_state("# A\n\ntext\n\n## B\n");
+        s.offset = s.doc.headings[1].line;
+        handle_key(&mut s, key('T'));
+        assert_eq!(s.offset, s.doc.headings[0].line);
+    }
+
+    #[test]
+    fn outline_j_moves_selection() {
+        let mut s = md_state("# A\n\n## B\n\n## C\n");
+        handle_key(&mut s, key('o'));
+        assert_eq!(s.outline_selection, 0);
+        handle_key(&mut s, key('j'));
+        assert_eq!(s.outline_selection, 1);
+        handle_key(&mut s, key('k'));
+        assert_eq!(s.outline_selection, 0);
+    }
+
+    #[test]
+    fn outline_enter_jumps_and_closes() {
+        let mut s = md_state("# A\n\n## B\n\n## C\n");
+        handle_key(&mut s, key('o'));
+        handle_key(&mut s, key('j')); // select B
+        handle_key(&mut s, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!s.show_outline);
+        assert_eq!(s.offset, s.doc.headings[1].line);
+    }
+
+    #[test]
+    fn outline_esc_closes_without_jumping() {
+        let mut s = md_state("# A\n\n## B\n");
+        let initial_offset = s.offset;
+        handle_key(&mut s, key('o'));
+        handle_key(&mut s, key('j'));
+        handle_key(&mut s, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!s.show_outline);
+        assert_eq!(s.offset, initial_offset);
+    }
+
+    #[test]
+    fn tab_toggles_fold() {
+        let mut s = md_state("# A\n\nbody line\n\n## B");
+        let full = s.line_count();
+        handle_key(&mut s, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(s.line_count() < full, "folding should reduce visible lines");
+        handle_key(&mut s, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(s.line_count(), full);
     }
 }
