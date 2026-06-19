@@ -137,3 +137,31 @@ fn markdown_renders_via_render_module() {
     assert!(text.contains("Hello"));
     assert!(text.contains("bold"));
 }
+
+#[cfg(not(feature = "mermaid"))]
+#[test]
+fn markdown_mermaid_fixture_falls_back_without_feature() {
+    let path = std::path::Path::new("tests/fixtures/mermaid.md");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    assert_eq!(input.render_mode, ResolvedMode::Markdown);
+    let doc = Document::new(&input, 200);
+    let text = all_text(&doc.lines);
+    assert!(text.contains("Mermaid Fixture"));
+    assert!(text.contains("┌─ mermaid"));
+    assert!(text.contains("graph LR"));
+    assert!(text.contains("mermaid render failed:"));
+}
+
+#[cfg(feature = "mermaid")]
+#[test]
+fn markdown_mermaid_fixture_renders_with_feature() {
+    let path = std::path::Path::new("tests/fixtures/mermaid.md");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    let doc = Document::new(&input, 200);
+    let text = all_text(&doc.lines);
+    assert!(text.contains("Mermaid Fixture"));
+    assert!(text.contains("Start") || text.contains("A"));
+    assert!(text.contains("Alice") || text.contains("Bob"));
+    assert!(text.contains("this is invalid mermaid"));
+    assert!(text.contains("mermaid render failed:"));
+}

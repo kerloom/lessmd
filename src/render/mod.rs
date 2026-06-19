@@ -5,6 +5,7 @@ use ratatui::text::Line;
 use crate::source::{Input, ResolvedMode};
 
 pub mod markdown;
+pub mod mermaid;
 pub mod text;
 
 /// Render the whole document up-front to a flat list of terminal rows,

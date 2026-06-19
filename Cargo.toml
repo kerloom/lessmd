@@ -5,11 +5,15 @@ edition = "2024"
 description = "A less-like terminal pager that renders markdown and mermaid"
 license = "MIT"
 
+[features]
+mermaid = ["dep:figurehead"]
+
 [dependencies]
 ratatui = "0.30.2"
 crossterm = "0.29.0"
 unicode-width = "0.2"
 pulldown-cmark = "0.13"
+figurehead = { version = "0.4", optional = true, features = ["sequence", "class"] }
 
 [profile.release]
 lto = true

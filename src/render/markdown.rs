@@ -12,16 +12,27 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use super::mermaid::{DefaultMermaidRenderer, MermaidRenderer};
 use super::text::wrap_line;
 
 /// Render markdown `text` into a flat list of terminal lines wrapped to `width`.
 pub fn render_markdown(text: &str, width: u16) -> Vec<Line<'static>> {
+    let renderer = DefaultMermaidRenderer;
+    render_markdown_with_mermaid(text, width, &renderer)
+}
+
+/// Render markdown with an injected Mermaid renderer.
+pub fn render_markdown_with_mermaid(
+    text: &str,
+    width: u16,
+    mermaid: &dyn MermaidRenderer,
+) -> Vec<Line<'static>> {
     let opts = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_SMART_PUNCTUATION;
     let parser = Parser::new_ext(text, opts);
-    let mut r = MdRenderer::new(width.max(1) as usize);
+    let mut r = MdRenderer::new(width.max(1) as usize, mermaid);
     for event in parser {
         r.handle(event);
     }
@@ -56,8 +67,9 @@ struct TableBuilder {
     header: Option<Vec<String>>,
 }
 
-struct MdRenderer {
+struct MdRenderer<'a> {
     width: usize,
+    mermaid: &'a dyn MermaidRenderer,
     out: Vec<Line<'static>>,
     pending: Vec<Span<'static>>,
     /// Base style for the current block (heading color, blockquote dim, ...).
@@ -77,10 +89,11 @@ struct MdRenderer {
     in_cell: bool,
 }
 
-impl MdRenderer {
-    fn new(width: usize) -> Self {
+impl<'a> MdRenderer<'a> {
+    fn new(width: usize, mermaid: &'a dyn MermaidRenderer) -> Self {
         Self {
             width,
+            mermaid,
             out: Vec::new(),
             pending: Vec::new(),
             block_style: Style::default(),
@@ -440,12 +453,31 @@ impl MdRenderer {
     fn flush_code_block(&mut self) {
         let code = self.code_buf.take().unwrap_or_default();
         let lang = self.code_lang.take();
+        if is_mermaid_lang(lang.as_deref()) {
+            self.flush_mermaid_block(&code);
+            return;
+        }
+
+        self.push_code_block(&code, lang.as_deref());
+    }
+
+    fn flush_mermaid_block(&mut self, code: &str) {
+        match self.mermaid.render(code) {
+            Ok(rendered) => self.push_rendered_mermaid(&rendered),
+            Err(err) => {
+                self.push_code_block(code, Some("mermaid"));
+                self.push_mermaid_note(&err);
+            }
+        }
+    }
+
+    fn push_code_block(&mut self, code: &str, lang: Option<&str>) {
         let prefix = self.cont_prefix.clone();
         let prefix_w = width_of(&prefix);
         let avail = self.width.saturating_sub(prefix_w).max(1);
         let pfx_style = self.prefix_style();
 
-        if let Some(l) = &lang
+        if let Some(l) = lang
             && !l.is_empty()
         {
             let mut spans = Vec::new();
@@ -478,6 +510,44 @@ impl MdRenderer {
         }
     }
 
+    fn push_rendered_mermaid(&mut self, rendered: &str) {
+        let prefix = self.cont_prefix.clone();
+        let prefix_w = width_of(&prefix);
+        let avail = self.width.saturating_sub(prefix_w).max(1);
+        let pfx_style = self.prefix_style();
+        let diagram_style = Style::default().fg(Color::Cyan);
+
+        for line in rendered.lines() {
+            if line.is_empty() {
+                self.out
+                    .push(prefix_line(&prefix, self.quote_depth, pfx_style));
+                continue;
+            }
+            let wrapped = wrap_line(&Line::styled(line.to_owned(), diagram_style), avail);
+            for wl in &wrapped {
+                let mut spans = Vec::new();
+                if !prefix.is_empty() {
+                    spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
+                }
+                spans.extend(wl.spans.iter().cloned());
+                self.out.push(Line::from(spans));
+            }
+        }
+    }
+
+    fn push_mermaid_note(&mut self, err: &str) {
+        let prefix = self.cont_prefix.clone();
+        let mut spans = Vec::new();
+        if !prefix.is_empty() {
+            spans.push(prefix_span(&prefix, self.quote_depth, self.prefix_style()));
+        }
+        spans.push(Span::styled(
+            format!("mermaid render failed: {err}"),
+            Style::default().dim().fg(Color::DarkGray),
+        ));
+        self.out.push(Line::from(spans));
+    }
+
     fn flush_table(&mut self) {
         let Some(tbl) = self.table.take() else {
             return;
@@ -507,6 +577,11 @@ impl MdRenderer {
 
 fn width_of(s: &str) -> usize {
     UnicodeWidthStr::width(s)
+}
+
+fn is_mermaid_lang(lang: Option<&str>) -> bool {
+    lang.and_then(|l| l.split_whitespace().next())
+        .is_some_and(|l| l.eq_ignore_ascii_case("mermaid"))
 }
 
 fn is_block_tag(tag: &Tag) -> bool {
@@ -743,7 +818,24 @@ fn pad_cell(cell: &str, width: usize, align: Alignment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::mermaid::MermaidRenderer;
     use ratatui::style::Modifier;
+
+    struct OkMermaidRenderer;
+
+    impl MermaidRenderer for OkMermaidRenderer {
+        fn render(&self, source: &str) -> Result<String, String> {
+            Ok(format!("mock diagram\n{source}"))
+        }
+    }
+
+    struct ErrMermaidRenderer;
+
+    impl MermaidRenderer for ErrMermaidRenderer {
+        fn render(&self, _source: &str) -> Result<String, String> {
+            Err("mock failure".to_owned())
+        }
+    }
 
     fn plain(line: &Line) -> String {
         let mut s = String::new();
@@ -865,6 +957,51 @@ mod tests {
         let text = all_plain(&lines);
         assert!(text.contains("rust"));
         assert!(text.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn detects_mermaid_fenced_block() {
+        let md = "```mermaid\ngraph LR\nA-->B\n```";
+        let renderer = OkMermaidRenderer;
+        let lines = render_markdown_with_mermaid(md, 80, &renderer);
+        let text = all_plain(&lines);
+        assert!(text.contains("mock diagram"));
+        assert!(text.contains("A-->B"));
+        assert!(!text.contains("┌─ mermaid"));
+    }
+
+    #[test]
+    fn mermaid_renderer_trait_is_used_by_markdown_renderer() {
+        let md = "before\n\n```mermaid\nsequenceDiagram\nAlice->>Bob: Hi\n```\n\nafter";
+        let renderer = OkMermaidRenderer;
+        let lines = render_markdown_with_mermaid(md, 80, &renderer);
+        let text = all_plain(&lines);
+        assert!(text.contains("before"));
+        assert!(text.contains("mock diagram"));
+        assert!(text.contains("Alice->>Bob: Hi"));
+        assert!(text.contains("after"));
+    }
+
+    #[test]
+    fn renders_unsupported_diagram_as_codeblock_fallback() {
+        let md = "```mermaid\nunknownDiagram\nA-->B\n```";
+        let renderer = ErrMermaidRenderer;
+        let lines = render_markdown_with_mermaid(md, 80, &renderer);
+        let text = all_plain(&lines);
+        assert!(text.contains("┌─ mermaid"));
+        assert!(text.contains("unknownDiagram"));
+        assert!(text.contains("mermaid render failed: mock failure"));
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn renders_invalid_mermaid_as_codeblock_fallback() {
+        let md = "```mermaid\nnot a diagram\n```";
+        let lines = render_markdown(md, 80);
+        let text = all_plain(&lines);
+        assert!(text.contains("┌─ mermaid"));
+        assert!(text.contains("not a diagram"));
+        assert!(text.contains("mermaid render failed:"));
     }
 
     #[test]

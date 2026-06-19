@@ -256,7 +256,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | M0 — Skeleton | Cargo project, alt-screen hello-world, clean teardown | [x] done | 1 | fmt/clippy/test green; uses `ratatui::run` (init+restore+panic hook) |
 | M1 — Plain-text pager | source + render/text + pager + input + search + help | [x] done | 1 | lib+bin split; 46 unit + 4 integration tests; hand-rolled ANSI SGR parser; substring search |
 | M2 — Markdown | render/markdown for all phase-1b features + per-feature tests | [x] done | 1 | pulldown-cmark 0.13; 21 unit + 7 integration markdown tests; tables/lists/blockquotes/code/inline all render |
-| M3 — Mermaid | render/mermaid + figurehead + fallback + tests | [ ] not started | — | |
+| M3 — Mermaid | render/mermaid + figurehead + fallback + tests | [x] done | 2 | optional `figurehead`; swappable renderer trait; valid diagrams render with `--features mermaid`; disabled/error paths fall back to code block + note; fmt/clippy/test + feature test green |
 | M4 — Polish | highlights / OSC8 / line-numbers / config (optional) | [ ] not started | — | |
 
 ### Session log
