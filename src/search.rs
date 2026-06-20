@@ -70,19 +70,26 @@ pub fn highlight_line(
     query: &str,
     current_byte_range: Option<(usize, usize)>,
 ) -> Line<'static> {
+    highlight_line_with_case(line, query, current_byte_range, CaseMode::Sensitive)
+}
+
+pub fn highlight_line_with_case(
+    line: &Line<'static>,
+    query: &str,
+    current_byte_range: Option<(usize, usize)>,
+    case_mode: CaseMode,
+) -> Line<'static> {
     if query.is_empty() {
         return line.clone();
     }
     let plain = line_to_plain(line);
-    let mut ranges: Vec<(usize, usize, bool)> = Vec::new();
-    let mut start = 0;
-    while let Some(pos) = plain[start..].find(query) {
-        let abs = start + pos;
-        let end = abs + query.len();
-        let is_current = matches!(current_byte_range, Some((c, _)) if c == abs);
-        ranges.push((abs, end, is_current));
-        start = end;
-    }
+    let ranges: Vec<(usize, usize, bool)> = match_byte_ranges(&plain, query, case_mode)
+        .into_iter()
+        .map(|(start, end)| {
+            let is_current = current_byte_range == Some((start, end));
+            (start, end, is_current)
+        })
+        .collect();
     if ranges.is_empty() {
         return line.clone();
     }
@@ -173,10 +180,89 @@ fn merge_styles(base: Style, highlight: Style) -> Style {
 /// Find the byte offset of the first occurrence of `query` in a line's
 /// plain text. Returns `None` if not found.
 pub fn match_byte_offset(line: &Line, query: &str) -> Option<usize> {
+    match_byte_range_with_case(line, query, CaseMode::Sensitive).map(|(start, _)| start)
+}
+
+pub fn match_byte_range_with_case(
+    line: &Line,
+    query: &str,
+    case_mode: CaseMode,
+) -> Option<(usize, usize)> {
+    match_byte_ranges(&line_to_plain(line), query, case_mode)
+        .into_iter()
+        .next()
+}
+
+fn match_byte_ranges(plain: &str, query: &str, case_mode: CaseMode) -> Vec<(usize, usize)> {
     if query.is_empty() {
-        return None;
+        return Vec::new();
     }
-    line_to_plain(line).find(query)
+    match case_mode {
+        CaseMode::Sensitive => sensitive_match_byte_ranges(plain, query),
+        CaseMode::Insensitive => folded_match_byte_ranges(plain, query),
+        CaseMode::Smart => {
+            if query.chars().any(|c| c.is_uppercase()) {
+                sensitive_match_byte_ranges(plain, query)
+            } else {
+                folded_match_byte_ranges(plain, query)
+            }
+        }
+    }
+}
+
+fn sensitive_match_byte_ranges(plain: &str, query: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    while let Some(pos) = plain[start..].find(query) {
+        let abs = start + pos;
+        let end = abs + query.len();
+        ranges.push((abs, end));
+        start = end;
+    }
+    ranges
+}
+
+fn folded_match_byte_ranges(plain: &str, query: &str) -> Vec<(usize, usize)> {
+    let query = query.to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let (folded, start_map, end_map) = fold_with_byte_maps(plain);
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    while let Some(pos) = folded[start..].find(&query) {
+        let folded_start = start + pos;
+        let folded_end = folded_start + query.len();
+        if let (Some(&original_start), Some(&original_end)) =
+            (start_map.get(folded_start), end_map.get(folded_end - 1))
+        {
+            ranges.push((original_start, original_end));
+        }
+        start = folded_end;
+    }
+    ranges
+}
+
+fn fold_with_byte_maps(s: &str) -> (String, Vec<usize>, Vec<usize>) {
+    let mut folded = String::new();
+    let mut start_map = Vec::new();
+    let mut end_map = Vec::new();
+
+    for (original_start, ch) in s.char_indices() {
+        let original_end = original_start + ch.len_utf8();
+        for lower in ch.to_lowercase() {
+            let mut buf = [0; 4];
+            let encoded = lower.encode_utf8(&mut buf);
+            folded.push_str(encoded);
+            for _ in encoded.as_bytes() {
+                start_map.push(original_start);
+                end_map.push(original_end);
+            }
+        }
+    }
+
+    (folded, start_map, end_map)
 }
 
 #[cfg(test)]
@@ -293,6 +379,47 @@ mod tests {
             .unwrap();
         assert_eq!(second_foo.style.bg, Some(Color::LightBlue));
         let _ = first_foo;
+    }
+
+    #[test]
+    fn highlight_case_insensitive_match() {
+        let line = Line::raw("Foo bar");
+        let highlighted = highlight_line_with_case(&line, "foo", None, CaseMode::Insensitive);
+        let match_span = highlighted
+            .spans
+            .iter()
+            .find(|s| s.content == "Foo")
+            .unwrap();
+        assert_eq!(match_span.style.bg, Some(Color::LightBlue));
+    }
+
+    #[test]
+    fn highlight_current_case_insensitive_match() {
+        let line = Line::raw("Foo bar");
+        let current = match_byte_range_with_case(&line, "foo", CaseMode::Insensitive);
+        assert_eq!(current, Some((0, 3)));
+
+        let highlighted = highlight_line_with_case(&line, "foo", current, CaseMode::Insensitive);
+        let match_span = highlighted
+            .spans
+            .iter()
+            .find(|s| s.content == "Foo")
+            .unwrap();
+        assert_eq!(match_span.style.bg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn highlight_smart_uppercase_stays_case_sensitive() {
+        let line = Line::raw("foo Foo");
+        let highlighted = highlight_line_with_case(&line, "Foo", None, CaseMode::Smart);
+        let highlighted_spans: Vec<_> = highlighted
+            .spans
+            .iter()
+            .filter(|s| s.style.bg.is_some())
+            .collect();
+        assert_eq!(highlighted_spans.len(), 1);
+        assert_eq!(highlighted_spans[0].content, "Foo");
+        assert_eq!(highlighted_spans[0].style.bg, Some(Color::LightBlue));
     }
 
     #[test]

@@ -335,12 +335,16 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
                 };
                 if should_highlight {
                     let current_range = if is_current {
-                        lessmd::search::match_byte_offset(line, query)
-                            .map(|pos| (pos, pos + query.len()))
+                        lessmd::search::match_byte_range_with_case(line, query, state.case_mode)
                     } else {
                         None
                     };
-                    *line = lessmd::search::highlight_line(line, query, current_range);
+                    *line = lessmd::search::highlight_line_with_case(
+                        line,
+                        query,
+                        current_range,
+                        state.case_mode,
+                    );
                 }
             }
         }
