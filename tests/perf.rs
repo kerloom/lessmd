@@ -84,6 +84,18 @@ fn gen_markdown_doc(n_sections: usize, lines_per_section: usize) -> String {
     s
 }
 
+fn prefix_source(text: &str, max_source_lines: usize) -> String {
+    let mut out = text
+        .lines()
+        .take(max_source_lines.max(1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
 /// Generate a markdown document with `n` flowchart mermaid blocks
 /// interspersed with text paragraphs.
 fn gen_markdown_with_mermaid(n_diagrams: usize) -> String {
@@ -205,6 +217,54 @@ fn perf_markdown_render_scaling() {
             elapsed.as_secs_f64() < chars as f64 * 100e-6,
             "rendering {chars} chars took too long: {}",
             fmt_duration(elapsed)
+        );
+    }
+}
+
+#[test]
+#[ignore]
+fn perf_prefix_first_paint_render() {
+    println!("\n=== startup: prefix first-paint render for whole program ===");
+    println!(
+        "  {:>10} {:>10} {:>12} {:>12} {:>8}",
+        "type", "input", "prefix", "full", "speedup"
+    );
+
+    let prefix_lines = 24 * 20;
+    let cases = [
+        ("plain", gen_plain_lines(100_000), false),
+        ("markdown", gen_markdown_doc(500, 100), true),
+    ];
+
+    for (kind, text, markdown) in cases {
+        let prefix = prefix_source(&text, prefix_lines);
+        let prefix_input = if markdown {
+            md_input(&prefix)
+        } else {
+            text_input(&prefix)
+        };
+        let full_input = if markdown {
+            md_input(&text)
+        } else {
+            text_input(&text)
+        };
+
+        let prefix_start = Instant::now();
+        let prefix_doc = Document::new(&prefix_input, 80);
+        let prefix_elapsed = prefix_start.elapsed();
+
+        let full_start = Instant::now();
+        let full_doc = Document::new(&full_input, 80);
+        let full_elapsed = full_start.elapsed();
+
+        println!(
+            "  {kind:>10} {:>10} {:>12} {:>12} {:>7.1}x  lines {}/{}",
+            text.len(),
+            fmt_duration(prefix_elapsed),
+            fmt_duration(full_elapsed),
+            full_elapsed.as_nanos() as f64 / prefix_elapsed.as_nanos().max(1) as f64,
+            prefix_doc.lines.len(),
+            full_doc.lines.len(),
         );
     }
 }

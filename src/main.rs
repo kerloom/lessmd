@@ -71,33 +71,45 @@ fn run_app(
     render_options: RenderOptions,
 ) -> std::io::Result<()> {
     let size = terminal.size()?;
+    let prefix_source_lines = prefix_source_lines_for_height(size.height);
+    let use_prefix = should_use_prefix_input(&input, prefix_source_lines);
+    let first_input = if use_prefix {
+        prefix_input_for_viewport(&input, prefix_source_lines)
+    } else {
+        input.clone()
+    };
     let initial_options = initial_render_options(&input, render_options);
     let mut state = PagerState::new_with_options(
-        input.clone(),
+        first_input,
         size.height,
         size.width,
         line_numbers,
         initial_options,
     );
+    // Keep the full input for resize/search after first paint. The initial doc
+    // may be a prefix, but the state should know about the real source.
+    state.input = input.clone();
     let (enhanced_tx, enhanced_rx) = mpsc::channel::<EnhancedMsg>();
-    if initial_options != render_options {
+    if use_prefix || initial_options != render_options {
         let bg_input = input.clone();
         std::thread::spawn(move || {
-            let viewport_input = prefix_input_for_viewport(&bg_input, size.height as usize * 20);
-            let viewport = PagerState::new_with_options(
-                viewport_input,
-                size.height,
-                size.width,
-                line_numbers,
-                render_options,
-            );
-            let overlay: Vec<Line<'static>> = viewport
-                .doc
-                .lines
-                .into_iter()
-                .take(viewport.height)
-                .collect();
-            let _ = enhanced_tx.send(EnhancedMsg::Viewport(overlay));
+            if initial_options != render_options {
+                let viewport_input = prefix_input_for_viewport(&bg_input, prefix_source_lines);
+                let viewport = PagerState::new_with_options(
+                    viewport_input,
+                    size.height,
+                    size.width,
+                    line_numbers,
+                    render_options,
+                );
+                let overlay: Vec<Line<'static>> = viewport
+                    .doc
+                    .lines
+                    .into_iter()
+                    .take(viewport.height)
+                    .collect();
+                let _ = enhanced_tx.send(EnhancedMsg::Viewport(overlay));
+            }
 
             let enhanced = PagerState::new_with_options(
                 bg_input,
@@ -165,6 +177,14 @@ fn initial_render_options(input: &source::Input, requested: RenderOptions) -> Re
     } else {
         requested
     }
+}
+
+fn prefix_source_lines_for_height(height: u16) -> usize {
+    (height as usize).saturating_mul(20).max(1)
+}
+
+fn should_use_prefix_input(input: &source::Input, max_source_lines: usize) -> bool {
+    input.text.lines().nth(max_source_lines).is_some()
 }
 
 fn prefix_input_for_viewport(input: &source::Input, max_source_lines: usize) -> source::Input {
@@ -455,6 +475,24 @@ mod tests {
         let prefix = prefix_input_for_viewport(&input, 2);
         assert_eq!(prefix.text, "a\nb\n");
         assert_eq!(prefix.render_mode, ResolvedMode::Markdown);
+    }
+
+    #[test]
+    fn should_use_prefix_when_input_exceeds_limit() {
+        let input = source::Input {
+            text: "a\nb\nc".to_owned(),
+            render_mode: ResolvedMode::Text { ansi: true },
+            source_path: None,
+        };
+        assert!(should_use_prefix_input(&input, 2));
+        assert!(!should_use_prefix_input(&input, 3));
+    }
+
+    #[test]
+    fn prefix_source_lines_scales_with_terminal_height() {
+        assert_eq!(prefix_source_lines_for_height(0), 1);
+        assert_eq!(prefix_source_lines_for_height(1), 20);
+        assert_eq!(prefix_source_lines_for_height(24), 480);
     }
 
     #[test]
