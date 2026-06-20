@@ -6,7 +6,7 @@
 //! panic hook that restores the terminal before panicking.
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
@@ -23,6 +23,9 @@ use lessmd::input;
 use lessmd::pager::{Mode, PagerState};
 use lessmd::render::RenderOptions;
 use lessmd::source::{self, ResolvedMode};
+
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const RESIZE_DEBOUNCE: Duration = Duration::from_millis(50);
 
 enum EnhancedMsg {
     Viewport {
@@ -138,6 +141,9 @@ fn run_app(
         );
     }
     let mut prev_offset = state.offset;
+    let mut needs_draw = true;
+    let mut pending_resize: Option<(u16, u16)> = None;
+    let mut last_resize_at: Option<Instant> = None;
     loop {
         while let Ok(msg) = enhanced_rx.try_recv() {
             match msg {
@@ -147,6 +153,7 @@ fn run_app(
                     }
                     state.set_viewport_overlay(lines);
                     terminal.clear()?;
+                    needs_draw = true;
                 }
                 EnhancedMsg::Full {
                     generation,
@@ -160,52 +167,79 @@ fn run_app(
                     state.width = width;
                     state.replace_doc(doc, options);
                     terminal.clear()?;
+                    needs_draw = true;
                 }
             }
         }
-        // Force a full redraw on multi-line jumps (Ctrl-D/U, PgUp/Dn, g, G)
-        // to bypass ratatui's diff optimizer, which can leave stale content.
-        if state.jumped(prev_offset) {
+
+        if let (Some((w, h)), Some(last)) = (pending_resize, last_resize_at)
+            && last.elapsed() >= RESIZE_DEBOUNCE
+        {
+            pending_resize = None;
+            last_resize_at = None;
+            render_generation += 1;
+            state.resize(h, w);
             terminal.clear()?;
+            needs_draw = true;
+            if state.render_options != render_options {
+                spawn_background_render(
+                    enhanced_tx.clone(),
+                    BackgroundRenderJob {
+                        input: state.input.clone(),
+                        height: h,
+                        width: w,
+                        line_numbers,
+                        current_options: state.render_options,
+                        requested_options: render_options,
+                        prefix_source_lines: prefix_source_lines_for_height(h),
+                        generation: render_generation,
+                    },
+                );
+            }
         }
-        prev_offset = state.offset;
-        terminal.draw(|frame| draw(frame, &mut state))?;
-        // `-F`: exit immediately if the rendered document fits in the viewport
-        // (status bar takes 1 line). Mirrors `less --quit-if-one-screen`.
-        if quit_if_one_screen && state.doc.lines.len() < size.height as usize {
-            return Ok(());
+
+        if needs_draw && pending_resize.is_none() {
+            // Force a full redraw on multi-line jumps (Ctrl-D/U, PgUp/Dn, g, G)
+            // to bypass ratatui's diff optimizer, which can leave stale content.
+            if state.jumped(prev_offset) {
+                terminal.clear()?;
+            }
+            prev_offset = state.offset;
+            terminal.draw(|frame| draw(frame, &mut state))?;
+            needs_draw = false;
+            // `-F`: exit immediately if the rendered document fits in the viewport
+            // (status bar takes 1 line). Mirrors `less --quit-if-one-screen`.
+            if quit_if_one_screen && state.doc.lines.len() <= state.height {
+                return Ok(());
+            }
         }
-        if event::poll(Duration::from_millis(25))? {
+
+        let poll_timeout = last_resize_at
+            .map(|last| resize_poll_timeout(last.elapsed()))
+            .unwrap_or(EVENT_POLL_INTERVAL);
+        if event::poll(poll_timeout)? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     input::handle_key(&mut state, key);
+                    needs_draw = true;
                     if state.quit {
                         return Ok(());
                     }
                 }
                 Event::Resize(w, h) => {
-                    render_generation += 1;
-                    state.resize(h, w);
-                    if state.render_options != render_options {
-                        spawn_background_render(
-                            enhanced_tx.clone(),
-                            BackgroundRenderJob {
-                                input: state.input.clone(),
-                                height: h,
-                                width: w,
-                                line_numbers,
-                                current_options: state.render_options,
-                                requested_options: render_options,
-                                prefix_source_lines: prefix_source_lines_for_height(h),
-                                generation: render_generation,
-                            },
-                        );
-                    }
+                    pending_resize = Some((w, h));
+                    last_resize_at = Some(Instant::now());
                 }
                 _ => {}
             }
         }
     }
+}
+
+fn resize_poll_timeout(elapsed: Duration) -> Duration {
+    RESIZE_DEBOUNCE
+        .saturating_sub(elapsed)
+        .min(EVENT_POLL_INTERVAL)
 }
 
 fn spawn_background_render(enhanced_tx: mpsc::Sender<EnhancedMsg>, job: BackgroundRenderJob) {
@@ -628,5 +662,21 @@ mod tests {
             "safe]52;c;badname"
         );
         assert_eq!(sanitize_terminal_text("line\nbreak"), "linebreak");
+    }
+
+    #[test]
+    fn resize_poll_timeout_waits_until_debounce_deadline() {
+        assert_eq!(
+            resize_poll_timeout(Duration::from_millis(0)),
+            EVENT_POLL_INTERVAL
+        );
+        assert_eq!(
+            resize_poll_timeout(Duration::from_millis(40)),
+            Duration::from_millis(10)
+        );
+        assert_eq!(
+            resize_poll_timeout(Duration::from_millis(50)),
+            Duration::ZERO
+        );
     }
 }
