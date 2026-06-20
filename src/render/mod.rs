@@ -18,6 +18,7 @@ pub struct RenderOptions {
     pub mermaid: bool,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
