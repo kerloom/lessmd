@@ -87,8 +87,11 @@ pub fn highlight_line(
         return line.clone();
     }
 
-    let current_style = Style::default().fg(Color::Black).bg(Color::Yellow).bold();
-    let other_style = Style::default().fg(Color::Black).bg(Color::DarkGray);
+    // Light blue tones for both match kinds so the search highlight reads as
+    // a single accent color rather than yellow + grey. The current match uses
+    // a slightly more saturated/darker blue and bold to stand out.
+    let current_style = Style::default().fg(Color::Black).bg(Color::Cyan).bold();
+    let other_style = Style::default().fg(Color::Black).bg(Color::LightBlue);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut byte_pos = 0usize;
@@ -272,23 +275,23 @@ mod tests {
     }
 
     #[test]
-    fn highlight_current_match_uses_yellow_background() {
+    fn highlight_current_match_uses_cyan_background() {
         let line = Line::raw("foo bar foo");
         // First "foo" at byte 0
         let highlighted = highlight_line(&line, "foo", Some((0, 3)));
         let first_foo = highlighted
             .spans
             .iter()
-            .find(|s| s.content == "foo" && s.style.bg == Some(Color::Yellow))
+            .find(|s| s.content == "foo" && s.style.bg == Some(Color::Cyan))
             .unwrap();
-        // Second "foo" should have DarkGray bg
+        // Second "foo" should have LightBlue bg
         let second_foo = highlighted
             .spans
             .iter()
             .filter(|s| s.content == "foo")
             .nth(1)
             .unwrap();
-        assert_eq!(second_foo.style.bg, Some(Color::DarkGray));
+        assert_eq!(second_foo.style.bg, Some(Color::LightBlue));
         let _ = first_foo;
     }
 
