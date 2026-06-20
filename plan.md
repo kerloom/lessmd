@@ -266,6 +266,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | M10 — Review hardening | low-effort/high-benefit review fixes | [x] done | 16 | Fixed stale keybinding docs/help; made syntax/Mermaid defaults feature-aware; reset fold/outline state on document replacement; made highlighting respect search case mode; sanitized status and markdown-derived terminal text. |
 | M11 — less compatibility polish | low-LoE compatibility flags/docs | [x] done | 19 | Updated `docs/less-compatibility.md` for existing numbered commands and percent jumps. Added `-K` / `--quit-on-intr`, so Ctrl-C exits immediately even from prompts. Full default and no-default fmt/clippy/test verification green. |
 | M12 — Search/startup compatibility | backward search + initial commands | [x] done | 20 | Added `?pattern`, direction-aware `n`/`N`, and initial `+G`, `+N`, `+/pattern`, `+?pattern` commands. Bumped version to 0.2.0, built release, copied to `~/.local/bin/lessmd`, and re-signed on macOS. |
+| M13 — EOF/quiet/pattern flags | `-q`/`-Q`, `-p`, `-e`/`-E` | [x] done | 21 | Added quiet, pattern, and quit-at-EOF CLI flags with pager EOF detection on forward scroll. Status bar and help overlay use `H` for help. Bumped version to 0.2.2. |
 
 ### Session log
 
@@ -291,6 +292,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | 18 | 2026-06-20 | Implemented the remaining review backlog: bounded input reads (256 MiB cap), dirty redraw tracking to skip idle frame renders, resize debounce/coalescing, binary-search lookup for search-highlight membership, and canonical syntax cache keys for language aliases/annotations. Added focused regression tests. | Review hardening backlog complete; future work is larger-scope architecture/perf work only if needed. |
 | 19 | 2026-06-20 | less compatibility pass: corrected `docs/less-compatibility.md` to mark counted movement/search and percent jumps as implemented; added `-K` / `--quit-on-intr` CLI/runtime support, including help text and tests. Verified `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo clippy --all-targets --no-default-features -- -D warnings`, `cargo test`, and `cargo test --no-default-features`. | Next low-LoE compatibility candidates: `-q`/`-Q` as accepted no-op quiet flags, then `-e`/`-E` EOF-exit behavior. |
 | 20 | 2026-06-20 | Implemented `?pattern` backward search with direction-aware `n`/`N`; added initial `+cmd` support for `+G`, `+N`, `+/pattern`, and `+?pattern`; moved in-pager help to `H` so `?` matches less. Updated compatibility docs, bumped version to 0.2.0, verified full default/no-default fmt+clippy+test set, built release, copied to `~/.local/bin/lessmd`, and re-signed. | Next compatibility candidates: `-p pattern`, `-q`/`-Q`, then `-e`/`-E`. |
+| 21 | 2026-06-20 | M13 compatibility flags: `-q`/`-Q`/`--quiet`, `-p`/`--pattern`, `-e`/`-E` quit-at-EOF on forward scroll. Status bar shows `Press H for help`; help overlay maps `H` to toggle and `?` to backward search. Bumped to 0.2.2. | Next low-LoE candidates: `-X`, `-c`/`-C`, `-f`, `-d`. |
 
 ### Per-task checklist (granular tracker)
 

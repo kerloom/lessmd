@@ -12,7 +12,7 @@ pub fn help_text() -> Text<'static> {
     ));
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
-    let entries: [(&str, &str); 24] = [
+    let entries: [(&str, &str); 25] = [
         ("j / e / Down", "scroll down N lines (1 if no count)"),
         ("k / y / Up", "scroll up N lines (1 if no count)"),
         ("h / <-", "pan left N columns (8 if no count)"),
@@ -29,13 +29,14 @@ pub fn help_text() -> Text<'static> {
         ("o", "toggle outline (jump to heading)"),
         ("Tab", "toggle fold on heading"),
         ("/", "start search (preceded by N = Nth match)"),
+        ("?", "start backward search"),
         ("n", "next match"),
         ("N", "previous match"),
         ("r / Ctrl-L", "repaint (no-op)"),
         ("Esc-u", "toggle search-match highlighting"),
         ("Esc-U", "clear saved search + highlighting"),
         ("Ctrl-C", "abort search"),
-        ("?", "toggle this help"),
+        ("H", "toggle this help"),
         ("q / Q / Esc", "quit"),
     ];
 
@@ -63,10 +64,11 @@ mod tests {
     }
 
     #[test]
-    fn help_lists_question_mark_and_horizontal_pan_keys() {
+    fn help_lists_help_key_and_horizontal_pan_keys() {
         let text = plain(&help_text());
-        assert!(text.contains("?"));
+        assert!(text.contains("H"));
         assert!(text.contains("toggle this help"));
+        assert!(text.contains("start backward search"));
         assert!(text.contains("h / <-"));
         assert!(text.contains("l / ->"));
         assert!(text.contains("outline"));
