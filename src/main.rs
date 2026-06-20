@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -51,6 +52,16 @@ struct BackgroundRenderJob {
     generation: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AppOptions {
+    line_numbers: bool,
+    render_options: RenderOptions,
+    quit_if_one_screen: bool,
+    quit_on_intr: bool,
+    case_mode: lessmd::search::CaseMode,
+    highlight: lessmd::pager::HighlightMode,
+}
+
 fn main() -> std::io::Result<()> {
     let args = match cli::parse(std::env::args()) {
         Ok(a) => a,
@@ -67,10 +78,16 @@ fn main() -> std::io::Result<()> {
         println!("lessmd {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    let line_numbers = args.line_numbers;
-    let render_options = RenderOptions {
-        syntax: args.syntax,
-        mermaid: args.mermaid,
+    let options = AppOptions {
+        line_numbers: args.line_numbers,
+        render_options: RenderOptions {
+            syntax: args.syntax,
+            mermaid: args.mermaid,
+        },
+        quit_if_one_screen: args.quit_if_one_screen,
+        quit_on_intr: args.quit_on_intr,
+        case_mode: args.case_mode,
+        highlight: args.highlight,
     };
     let input = match source::read(args.path.as_deref(), args.mode) {
         Ok(i) => i,
@@ -79,27 +96,13 @@ fn main() -> std::io::Result<()> {
             std::process::exit(1);
         }
     };
-    ratatui::run(|terminal| {
-        run_app(
-            terminal,
-            input,
-            line_numbers,
-            render_options,
-            args.quit_if_one_screen,
-            args.case_mode,
-            args.highlight,
-        )
-    })
+    ratatui::run(|terminal| run_app(terminal, input, options))
 }
 
 fn run_app(
     terminal: &mut ratatui::DefaultTerminal,
     input: source::Input,
-    line_numbers: bool,
-    render_options: RenderOptions,
-    quit_if_one_screen: bool,
-    case_mode: lessmd::search::CaseMode,
-    highlight: lessmd::pager::HighlightMode,
+    options: AppOptions,
 ) -> std::io::Result<()> {
     let size = terminal.size()?;
     let prefix_source_lines = prefix_source_lines_for_height(size.height);
@@ -109,22 +112,22 @@ fn run_app(
     } else {
         input.clone()
     };
-    let initial_options = initial_render_options(&input, render_options);
+    let initial_options = initial_render_options(&input, options.render_options);
     let mut state = PagerState::new_with_options(
         first_input,
         size.height,
         size.width,
-        line_numbers,
+        options.line_numbers,
         initial_options,
     );
     // Keep the full input for resize/search after first paint. The initial doc
     // may be a prefix, but the state should know about the real source.
     state.input = input.clone();
-    state.set_case_mode(case_mode);
-    state.set_highlight(highlight);
+    state.set_case_mode(options.case_mode);
+    state.set_highlight(options.highlight);
     let (enhanced_tx, enhanced_rx) = mpsc::channel::<EnhancedMsg>();
     let mut render_generation = 0;
-    if use_prefix || initial_options != render_options {
+    if use_prefix || initial_options != options.render_options {
         render_generation += 1;
         spawn_background_render(
             enhanced_tx.clone(),
@@ -132,9 +135,9 @@ fn run_app(
                 input: input.clone(),
                 height: size.height,
                 width: size.width,
-                line_numbers,
+                line_numbers: options.line_numbers,
                 current_options: initial_options,
-                requested_options: render_options,
+                requested_options: options.render_options,
                 prefix_source_lines,
                 generation: render_generation,
             },
@@ -181,16 +184,16 @@ fn run_app(
             state.resize(h, w);
             terminal.clear()?;
             needs_draw = true;
-            if state.render_options != render_options {
+            if state.render_options != options.render_options {
                 spawn_background_render(
                     enhanced_tx.clone(),
                     BackgroundRenderJob {
                         input: state.input.clone(),
                         height: h,
                         width: w,
-                        line_numbers,
+                        line_numbers: options.line_numbers,
                         current_options: state.render_options,
-                        requested_options: render_options,
+                        requested_options: options.render_options,
                         prefix_source_lines: prefix_source_lines_for_height(h),
                         generation: render_generation,
                     },
@@ -209,7 +212,7 @@ fn run_app(
             needs_draw = false;
             // `-F`: exit immediately if the rendered document fits in the viewport
             // (status bar takes 1 line). Mirrors `less --quit-if-one-screen`.
-            if quit_if_one_screen && state.doc.lines.len() <= state.height {
+            if options.quit_if_one_screen && state.doc.lines.len() <= state.height {
                 return Ok(());
             }
         }
@@ -220,6 +223,9 @@ fn run_app(
         if event::poll(poll_timeout)? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if options.quit_on_intr && is_interrupt_key(key) {
+                        return Ok(());
+                    }
                     input::handle_key(&mut state, key);
                     needs_draw = true;
                     if state.quit {
@@ -234,6 +240,10 @@ fn run_app(
             }
         }
     }
+}
+
+fn is_interrupt_key(key: KeyEvent) -> bool {
+    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 fn resize_poll_timeout(elapsed: Duration) -> Duration {
@@ -678,5 +688,21 @@ mod tests {
             resize_poll_timeout(Duration::from_millis(50)),
             Duration::ZERO
         );
+    }
+
+    #[test]
+    fn interrupt_key_is_ctrl_c() {
+        assert!(is_interrupt_key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        )));
+        assert!(!is_interrupt_key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::NONE,
+        )));
+        assert!(!is_interrupt_key(KeyEvent::new(
+            KeyCode::Char('x'),
+            KeyModifiers::CONTROL,
+        )));
     }
 }

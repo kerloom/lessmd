@@ -98,6 +98,7 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 | `-I` / `--IGNORE-CASE` | `-I` / `--IGNORE-CASE` | ✅ just added |
 | `-g` / `--hilite-search` | `-g` / `--hilite-search` | ✅ just added (only current match) |
 | `-G` / `--HILITE-SEARCH` | `-G` / `--HILITE-SEARCH` | ✅ just added (no highlight) |
+| `-K` / `--quit-on-intr` | `-K` / `--quit-on-intr` | Ctrl-C exits even from prompts |
 | — | `--markdown` / `--plain` | ours |
 | — | `--no-syntax` / `--no-mermaid` | ours |
 
@@ -107,7 +108,6 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 
 - `-e` / `--quit-at-eof` (auto-exit on 2nd EOF)
 - `-E` / `--QUIT-AT-EOF` (auto-exit on 1st EOF)
-- `-K` / `--quit-on-intr` (Ctrl-C exits)
 - `-q` / `-Q` / `--quiet` (silence bell)
 - `-X` / `--no-init` (skip termcap init/deinit)
 - `-c` / `-C` / `--clear-screen` (repaint by clearing)
@@ -178,7 +178,7 @@ The biggest **methodology** gap is end-to-end TUI testing:
 - [x] Numbered command args for movement/search (`5j`, `10G`, `50%`, `2/pat`)
 - [ ] `+cmd` initial commands (`+G`, `+/pat`, `+/pat-N`)
 - [ ] `-e` / `-E` (auto-exit on EOF)
-- [ ] `-K` (Ctrl-C exits)
+- [x] `-K` (Ctrl-C exits even from prompts)
 - [ ] `-q` / `-Q` (silence bell)
 
 **Medium-low (deferred per "even skip medium-low"):**

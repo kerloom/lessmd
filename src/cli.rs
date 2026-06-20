@@ -17,6 +17,8 @@ pub struct Args {
     /// `-F` / `--quit-if-one-screen`: exit immediately if the entire file
     /// fits on the first screen.
     pub quit_if_one_screen: bool,
+    /// `-K` / `--quit-on-intr`: Ctrl-C exits even from prompts.
+    pub quit_on_intr: bool,
     /// `-i` / `-I`: case-sensitivity mode for `/` searches. Mirrors `less`.
     pub case_mode: CaseMode,
     /// `-g` / `-G`: search-match highlight mode. Mirrors `less`.
@@ -58,6 +60,7 @@ Options:
   --no-mermaid      Disable inline Mermaid rendering.
   -N, --line-numbers  Show line numbers in a left gutter.
   -F, --quit-if-one-screen  Exit if the whole file fits on the first screen.
+  -K, --quit-on-intr  Exit immediately on Ctrl-C, even from prompts.
   -i, --ignore-case  Ignore case in searches (unless pattern has uppercase).
   -I, --IGNORE-CASE  Ignore case in all searches.
   -g, --hilite-search  Highlight only the current search match.
@@ -117,6 +120,7 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
             "--no-mermaid" => out.mermaid = false,
             "-N" | "--line-numbers" => out.line_numbers = true,
             "-F" | "--quit-if-one-screen" => out.quit_if_one_screen = true,
+            "-K" | "--quit-on-intr" => out.quit_on_intr = true,
             "-i" | "--ignore-case" => out.case_mode = CaseMode::Smart,
             "-I" | "--IGNORE-CASE" => out.case_mode = CaseMode::Insensitive,
             "-g" | "--hilite-search" => out.highlight = HighlightMode::Last,
@@ -215,6 +219,13 @@ mod tests {
         assert!(parse_args(&["-F", "x"]).quit_if_one_screen);
         assert!(parse_args(&["--quit-if-one-screen", "x"]).quit_if_one_screen);
         assert!(!parse_args(&["x"]).quit_if_one_screen);
+    }
+
+    #[test]
+    fn quit_on_intr_flag() {
+        assert!(parse_args(&["-K", "x"]).quit_on_intr);
+        assert!(parse_args(&["--quit-on-intr", "x"]).quit_on_intr);
+        assert!(!parse_args(&["x"]).quit_on_intr);
     }
 
     #[test]
