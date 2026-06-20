@@ -68,21 +68,25 @@ Options:
 When FILE is omitted or '-', lessmd reads from stdin.
 
 Keybindings (inside the pager):
-  j / e / Down             scroll down one line
-  k / y / Up               scroll up one line
-  h / Left                 pan left
-  l / Right                pan right
-  Space / f / PageDown     scroll down one page
-  b / PageUp               scroll up one page
-  Ctrl-D                   scroll down half a page
-  Ctrl-U                   scroll up half a page
-  g / Home                 go to top
-  G / End                  go to bottom
+  Most commands accept a digit prefix, e.g. `5j` scrolls 5 lines,
+  `10G` jumps to line 10, `50%` jumps to 50% into the file.
+
+  j / e / Down             scroll down N lines (1 if no count)
+  k / y / Up               scroll up N lines (1 if no count)
+  h / Left                 pan left N columns (8 if no count)
+  l / Right                pan right N columns (8 if no count)
+  Space / f / PageDown     scroll down N pages
+  b / PageUp               scroll up N pages
+  Ctrl-D                   scroll down N half-pages
+  Ctrl-U                   scroll up N half-pages
+  g / Home                 go to line N (top if no count)
+  G / End                  go to line N (bottom if no count)
+  p / %                    go to N percent into the file
   t                        next heading
   T                        previous heading
   o                        toggle outline (jump to heading)
   Tab                      toggle fold on heading
-  /                        start search
+  /                        start search (N before / = Nth match)
   n                        next search match
   N                        previous search match
   r / Ctrl-L               repaint (no-op; ratatui redraws every frame)

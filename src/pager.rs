@@ -60,6 +60,10 @@ pub struct PagerState {
     /// Search-match highlight mode. Mirrors `less`'s `-g`/`-G` and the
     /// `ESC-u` / `ESC-U` runtime toggles.
     pub highlight: HighlightMode,
+    /// Pending digit prefix for the next command. Typing `1` then `0` then
+    /// `j` sets this to `Some(10)` and the next `j` scrolls 10 lines.
+    /// Matches `less`'s "N may precede a command" behavior.
+    pub pending_count: Option<usize>,
     /// Heading indices (into `doc.headings`) whose body is folded.
     pub folded: HashSet<usize>,
     /// Maps each visible row → index into `doc.lines`. Rebuilt when folds
@@ -115,6 +119,7 @@ impl PagerState {
             line_numbers,
             case_mode: CaseMode::default(),
             highlight: HighlightMode::default(),
+            pending_count: None,
             folded: HashSet::new(),
             visible_indices: Vec::new(),
             viewport_overlay: None,
@@ -234,6 +239,21 @@ impl PagerState {
         self.scroll_up(self.height.saturating_sub(1).max(1));
     }
 
+    /// `N f` / `N Space` — page down N times.
+    pub fn page_down_n(&mut self, n: usize) {
+        let step = self.height.saturating_sub(1).max(1);
+        self.offset = self
+            .offset
+            .saturating_add(step.saturating_mul(n))
+            .min(self.max_offset());
+    }
+
+    /// `N b` — page up N times.
+    pub fn page_up_n(&mut self, n: usize) {
+        let step = self.height.saturating_sub(1).max(1);
+        self.offset = self.offset.saturating_sub(step.saturating_mul(n));
+    }
+
     /// Vim-style half-page down (Ctrl-D).
     pub fn half_page_down(&mut self) {
         self.scroll_down(self.height / 2);
@@ -242,6 +262,44 @@ impl PagerState {
     /// Vim-style half-page up (Ctrl-U).
     pub fn half_page_up(&mut self) {
         self.scroll_up(self.height / 2);
+    }
+
+    /// `N Ctrl-D` — half-page down N times.
+    pub fn half_page_down_n(&mut self, n: usize) {
+        let step = self.height / 2;
+        self.offset = self
+            .offset
+            .saturating_add(step.saturating_mul(n))
+            .min(self.max_offset());
+    }
+
+    /// `N Ctrl-U` — half-page up N times.
+    pub fn half_page_up_n(&mut self, n: usize) {
+        let step = self.height / 2;
+        self.offset = self.offset.saturating_sub(step.saturating_mul(n));
+    }
+
+    /// `N g` / `N G` — go to line `N` (1-based). `N = 0` jumps to top.
+    /// Matches `less`'s `g`/`G` behavior when prefixed with a count.
+    pub fn goto_line(&mut self, n: usize) {
+        if n == 0 {
+            self.goto_top();
+            return;
+        }
+        let target = n.saturating_sub(1);
+        let max = self.doc.lines.len().saturating_sub(1);
+        self.jump_to_doc_line(target.min(max));
+    }
+
+    /// `N p` / `N %` — go to N percent into the document (0..=100).
+    pub fn goto_percent(&mut self, n: u16) {
+        if self.doc.lines.is_empty() {
+            return;
+        }
+        let pct = (n.min(100) as f64) / 100.0;
+        let max_line = self.doc.lines.len() - 1;
+        let line = ((max_line as f64 * pct) as usize).min(max_line);
+        self.jump_to_doc_line(line);
     }
 
     pub fn goto_top(&mut self) {
@@ -333,9 +391,12 @@ impl PagerState {
         let matches = search_lines(&self.doc.lines, &query, self.case_mode);
         if matches.is_empty() {
             self.search = None;
+            self.pending_count = None;
             self.status = format!("no matches for {query:?}");
         } else {
-            let current = 0;
+            // `N /pattern` jumps to the Nth match (1-based).
+            let n = self.pending_count.take().unwrap_or(1).max(1);
+            let current = (n - 1).min(matches.len() - 1);
             self.jump_to_doc_line(matches[current]);
             self.status = format!("{}/{} matches", current + 1, matches.len());
             self.search = Some(SearchState {
@@ -414,6 +475,32 @@ impl PagerState {
         self.search = None;
         self.highlight = HighlightMode::None;
         self.status.clear();
+    }
+
+    // -- digit-prefix count --------------------------------------------------
+
+    /// Append a digit (0-9) to the pending command count. Saturates at
+    /// `usize::MAX` to prevent overflow.
+    pub fn push_digit(&mut self, d: u8) {
+        if d > 9 {
+            return;
+        }
+        let cur = self.pending_count.unwrap_or(0);
+        let new = cur.saturating_mul(10).saturating_add(d as usize);
+        self.pending_count = Some(new);
+    }
+
+    /// Take the pending count, clearing it. Returns the count even if it is
+    /// `0` (so `0G` can mean "go to top"); callers that treat `0` as
+    /// "no count" should `.filter(|&n| n > 0)` themselves.
+    pub fn take_count(&mut self) -> Option<usize> {
+        self.pending_count.take()
+    }
+
+    /// Drop the pending count without using it (e.g. the user typed digits
+    /// but pressed a non-counted key like `?`).
+    pub fn clear_count(&mut self) {
+        self.pending_count = None;
     }
 
     // -- folding -------------------------------------------------------------
@@ -1340,5 +1427,172 @@ mod tests {
         s.clear_search();
         assert!(s.search.is_none());
         assert_eq!(s.highlight, HighlightMode::None);
+    }
+
+    // -- digit-prefix count --------------------------------------------------
+
+    #[test]
+    fn push_digit_accumulates() {
+        let mut s = make_state("hello", 24, 80);
+        s.push_digit(1);
+        s.push_digit(2);
+        s.push_digit(3);
+        assert_eq!(s.pending_count, Some(123));
+    }
+
+    #[test]
+    fn push_digit_zero_starts_count() {
+        // `0` is a real count start in less (e.g. `0G` = top).
+        let mut s = make_state("hello", 24, 80);
+        s.push_digit(0);
+        assert_eq!(s.pending_count, Some(0));
+    }
+
+    #[test]
+    fn push_digit_saturates_at_usize_max() {
+        let mut s = make_state("hello", 24, 80);
+        s.pending_count = Some(usize::MAX);
+        s.push_digit(9);
+        assert_eq!(s.pending_count, Some(usize::MAX));
+    }
+
+    #[test]
+    fn take_count_returns_some_and_clears() {
+        let mut s = make_state("hello", 24, 80);
+        s.push_digit(5);
+        assert_eq!(s.take_count(), Some(5));
+        assert_eq!(s.pending_count, None);
+    }
+
+    #[test]
+    fn take_count_returns_zero_for_nth_line_zero() {
+        // `take_count` does NOT filter out zero — `0G` should be able to
+        // reach `goto_line(0)` and jump to the top. Callers that treat
+        // `0` as "no count" must filter themselves.
+        let mut s = make_state("hello", 24, 80);
+        s.push_digit(0);
+        assert_eq!(s.take_count(), Some(0));
+        assert_eq!(s.pending_count, None);
+    }
+
+    #[test]
+    fn goto_line_zero_via_take_count_jumps_to_top() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.push_digit(0);
+        let n = s.take_count().unwrap_or(0);
+        s.goto_line(n);
+        assert_eq!(s.offset, 0);
+    }
+
+    #[test]
+    fn take_count_on_none_returns_none() {
+        let mut s = make_state("hello", 24, 80);
+        assert_eq!(s.take_count(), None);
+    }
+
+    #[test]
+    fn clear_count_resets_pending() {
+        let mut s = make_state("hello", 24, 80);
+        s.push_digit(7);
+        s.clear_count();
+        assert_eq!(s.pending_count, None);
+    }
+
+    #[test]
+    fn page_down_n_scrolls_n_pages() {
+        let mut s = make_state(&"a\n".repeat(200), 24, 80);
+        s.page_down_n(3);
+        // height = 23 (24-1); page step is height - 1 = 22; 3 pages = 66.
+        assert_eq!(s.offset, 66);
+    }
+
+    #[test]
+    fn page_up_n_scrolls_back() {
+        let mut s = make_state(&"a\n".repeat(200), 24, 80);
+        s.offset = 100;
+        s.page_up_n(2);
+        // 2 pages of 22 = 44; 100 - 44 = 56.
+        assert_eq!(s.offset, 56);
+    }
+
+    #[test]
+    fn half_page_down_n_clamps_at_max() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.half_page_down_n(100);
+        assert_eq!(s.offset, s.max_offset());
+    }
+
+    #[test]
+    fn goto_line_zero_means_top() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.offset = 30;
+        s.goto_line(0);
+        assert_eq!(s.offset, 0);
+    }
+
+    #[test]
+    fn goto_line_is_1_based() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.goto_line(5);
+        assert_eq!(s.offset, 4);
+    }
+
+    #[test]
+    fn goto_line_clamps_to_last_visible() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.goto_line(9999);
+        // jump_to_doc_line sets offset to the visible position of the line,
+        // clamped to max_offset (= 50 - 23 = 27 for a 50-line, 23-tall view).
+        assert_eq!(s.offset, 27);
+    }
+
+    #[test]
+    fn goto_percent_zero_is_top() {
+        let mut s = make_state(&"a\n".repeat(100), 24, 80);
+        s.offset = 50;
+        s.goto_percent(0);
+        assert_eq!(s.offset, 0);
+    }
+
+    #[test]
+    fn goto_percent_100_is_last() {
+        let mut s = make_state(&"a\n".repeat(100), 24, 80);
+        s.goto_percent(100);
+        // 99 = last index, then jump_to_doc_line clamps to max_offset.
+        assert!(s.offset <= s.max_offset());
+    }
+
+    #[test]
+    fn goto_percent_50_lands_in_middle() {
+        let mut s = make_state(&"a\n".repeat(100), 24, 80);
+        s.goto_percent(50);
+        // (100 - 1) * 0.5 = 49.5 → 49.
+        assert_eq!(s.offset, 49);
+    }
+
+    #[test]
+    fn finalize_search_uses_pending_count_as_nth_match() {
+        // 5 matches; `3 /foo` should land on the 3rd.
+        let mut s = make_state("foo\nbar\nfoo\nbar\nfoo\nbar\nfoo\nbar\nfoo", 24, 80);
+        s.push_digit(3);
+        s.start_search();
+        for c in "foo".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+        let search = s.search.as_ref().unwrap();
+        assert_eq!(search.current, 2);
+        assert_eq!(s.status, "3/5 matches");
+    }
+
+    #[test]
+    fn finalize_search_without_count_defaults_to_first_match() {
+        let mut s = make_state("foo\nbar\nfoo", 24, 80);
+        s.start_search();
+        for c in "foo".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+        assert_eq!(s.search.as_ref().unwrap().current, 0);
     }
 }

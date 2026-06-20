@@ -19,6 +19,16 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         handle_outline_key(state, key);
         return;
     }
+    // Digit-prefix count: digits accumulate into `pending_count`; the next
+    // non-digit command consumes (or discards) it. Matches `less`.
+    if let KeyCode::Char(c) = key.code
+        && c.is_ascii_digit()
+    {
+        let d = (c as u8) - b'0';
+        state.push_digit(d);
+        return;
+    }
+    let count_before = state.pending_count;
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         // quit
@@ -29,21 +39,58 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         // Ctrl would otherwise be caught by the bare `Char('l')` arm.
         KeyCode::Char('l') if ctrl => state.repaint(),
         // movement (one line)
-        KeyCode::Char('j') | KeyCode::Char('e') | KeyCode::Down => state.scroll_down(1),
-        KeyCode::Char('k') | KeyCode::Char('y') | KeyCode::Up => state.scroll_up(1),
-        KeyCode::Char('l') | KeyCode::Right => state.scroll_right(8),
-        KeyCode::Char('h') | KeyCode::Left => state.scroll_left(8),
+        KeyCode::Char('j') | KeyCode::Char('e') | KeyCode::Down => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(1);
+            state.scroll_down(n);
+        }
+        KeyCode::Char('k') | KeyCode::Char('y') | KeyCode::Up => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(1);
+            state.scroll_up(n);
+        }
+        KeyCode::Char('l') | KeyCode::Right => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(8);
+            state.scroll_right(n);
+        }
+        KeyCode::Char('h') | KeyCode::Left => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(8);
+            state.scroll_left(n);
+        }
         KeyCode::Char('J') => state.scroll_down(1),
         KeyCode::Char('K') => state.scroll_up(1),
         // movement (one page)
-        KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::PageDown => state.page_down(),
-        KeyCode::Char('b') | KeyCode::PageUp => state.page_up(),
+        KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::PageDown => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(1);
+            state.page_down_n(n);
+        }
+        KeyCode::Char('b') | KeyCode::PageUp => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(1);
+            state.page_up_n(n);
+        }
         // movement (half page, vim-style)
-        KeyCode::Char('d') if ctrl => state.half_page_down(),
-        KeyCode::Char('u') if ctrl => state.half_page_up(),
+        KeyCode::Char('d') if ctrl => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(1);
+            state.half_page_down_n(n);
+        }
+        KeyCode::Char('u') if ctrl => {
+            let n = state.take_count().filter(|&n| n > 0).unwrap_or(1);
+            state.half_page_up_n(n);
+        }
         // jump
-        KeyCode::Char('g') | KeyCode::Home => state.goto_top(),
-        KeyCode::Char('G') | KeyCode::End => state.goto_bottom(),
+        KeyCode::Char('g') | KeyCode::Home => match state.take_count() {
+            Some(n) => state.goto_line(n),
+            None => state.goto_top(),
+        },
+        KeyCode::Char('G') | KeyCode::End => match state.take_count() {
+            Some(n) => state.goto_line(n),
+            None => state.goto_bottom(),
+        },
+        // `N p` / `N %` — jump to N percent (0..=100).
+        KeyCode::Char('p') | KeyCode::Char('%') => match state.take_count() {
+            Some(pct) => state.goto_percent(pct as u16),
+            None => {
+                state.status = "expected count before p/%".to_owned();
+            }
+        },
         // heading navigation
         KeyCode::Char('t') => state.next_heading(),
         KeyCode::Char('T') => state.prev_heading(),
@@ -62,6 +109,13 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         // help
         KeyCode::Char('?') => state.toggle_help(),
         _ => {}
+    }
+    // Discard the count if the dispatched command didn't consume it and
+    // we didn't just enter search mode (which needs the count for
+    // `Nth match` semantics). Matches `less`'s "any non-digit key
+    // consumes the count" behavior.
+    if state.pending_count == count_before && !matches!(state.mode, Mode::Search(_)) {
+        state.clear_count();
     }
 }
 
@@ -390,5 +444,122 @@ mod tests {
         handle_key(&mut s, KeyEvent::new(KeyCode::Char('U'), KeyModifiers::ALT));
         assert!(s.search.is_none());
         assert_eq!(s.highlight, HighlightMode::None);
+    }
+
+    // -- digit-prefix count --------------------------------------------------
+
+    #[test]
+    fn digit_accumulates_in_pending_count() {
+        let mut s = state("hello");
+        handle_key(&mut s, key('1'));
+        handle_key(&mut s, key('2'));
+        handle_key(&mut s, key('3'));
+        assert_eq!(s.pending_count, Some(123));
+    }
+
+    #[test]
+    fn zero_is_a_real_digit() {
+        // `0` starts a count, useful for `0G` = top.
+        let mut s = state("hello");
+        handle_key(&mut s, key('0'));
+        assert_eq!(s.pending_count, Some(0));
+    }
+
+    #[test]
+    fn digit_then_j_scrolls_n_lines() {
+        let mut s = state(&"a\n".repeat(50));
+        handle_key(&mut s, key('5'));
+        handle_key(&mut s, key('j'));
+        assert_eq!(s.offset, 5);
+        assert_eq!(s.pending_count, None);
+    }
+
+    #[test]
+    fn digit_then_k_scrolls_up_n_lines() {
+        let mut s = state(&"a\n".repeat(50));
+        s.offset = 20;
+        handle_key(&mut s, key('3'));
+        handle_key(&mut s, key('k'));
+        assert_eq!(s.offset, 17);
+    }
+
+    #[test]
+    fn digit_then_space_pages_down_n_times() {
+        let mut s = state(&"a\n".repeat(200));
+        // height = 23, page step = 22; 2 pages = 44.
+        handle_key(&mut s, key('2'));
+        handle_key(&mut s, key(' '));
+        assert_eq!(s.offset, 44);
+    }
+
+    #[test]
+    fn digit_then_g_jumps_to_line_n() {
+        let mut s = state(&"a\n".repeat(50));
+        handle_key(&mut s, key('1'));
+        handle_key(&mut s, key('0'));
+        handle_key(&mut s, key('G'));
+        // 1-based line 10 → index 9.
+        assert_eq!(s.offset, 9);
+    }
+
+    #[test]
+    fn g_without_count_goes_to_top() {
+        let mut s = state(&"a\n".repeat(50));
+        s.offset = 30;
+        handle_key(&mut s, key('g'));
+        assert_eq!(s.offset, 0);
+    }
+
+    #[test]
+    fn g_uppercase_without_count_goes_to_bottom() {
+        let mut s = state(&"a\n".repeat(50));
+        handle_key(&mut s, key('G'));
+        assert_eq!(s.offset, s.max_offset());
+    }
+
+    #[test]
+    fn digit_then_percent_jumps_to_n_percent() {
+        let mut s = state(&"a\n".repeat(100));
+        handle_key(&mut s, key('5'));
+        handle_key(&mut s, key('0'));
+        handle_key(&mut s, key('%'));
+        // 50% of 99 = 49.
+        assert_eq!(s.offset, 49);
+    }
+
+    #[test]
+    fn percent_without_count_sets_error_status() {
+        let mut s = state(&"a\n".repeat(50));
+        handle_key(&mut s, key('%'));
+        assert!(s.status.contains("expected count"));
+    }
+
+    #[test]
+    fn non_counted_command_clears_pending_count() {
+        // `5?` should drop the `5` since help doesn't use it.
+        let mut s = state(&"a\n".repeat(50));
+        handle_key(&mut s, key('5'));
+        handle_key(&mut s, key('?'));
+        assert!(s.show_help, "? should open help");
+        assert_eq!(s.pending_count, None, "count should be discarded");
+        // Close help, then verify a follow-up `j` defaults to 1.
+        handle_key(&mut s, key('q'));
+        assert!(!s.show_help);
+        let initial = s.offset;
+        handle_key(&mut s, key('j'));
+        assert_eq!(s.offset, initial + 1);
+    }
+
+    #[test]
+    fn digit_then_n_search_uses_count_as_nth_match() {
+        let mut s = state("foo\nbar\nfoo\nbar\nfoo");
+        handle_key(&mut s, key('2'));
+        handle_key(&mut s, key('/'));
+        for c in "foo".chars() {
+            handle_key(&mut s, key(c));
+        }
+        handle_key(&mut s, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let search = s.search.as_ref().unwrap();
+        assert_eq!(search.current, 1);
     }
 }

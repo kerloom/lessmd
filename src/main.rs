@@ -365,6 +365,10 @@ fn status_line(state: &PagerState) -> Text<'static> {
     match &state.mode {
         Mode::Search(q) => Text::from(format!("/{q}")),
         Mode::Normal => {
+            // Digit-prefix count being built: show ":<n>" until consumed.
+            if let Some(n) = state.pending_count {
+                return Text::from(format!(":{n}"));
+            }
             if !state.status.is_empty() {
                 Text::from(state.status.clone())
             } else {
