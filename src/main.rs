@@ -367,21 +367,21 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
 
 fn status_line(state: &PagerState) -> Text<'static> {
     match &state.mode {
-        Mode::Search(q) => Text::from(format!("/{q}")),
+        Mode::Search(q) => Text::from(format!("/{}", sanitize_terminal_text(q))),
         Mode::Normal => {
             // Digit-prefix count being built: show ":<n>" until consumed.
             if let Some(n) = state.pending_count {
                 return Text::from(format!(":{n}"));
             }
             if !state.status.is_empty() {
-                Text::from(state.status.clone())
+                Text::from(sanitize_terminal_text(&state.status))
             } else {
                 let name = state
                     .doc
                     .source_path
                     .as_deref()
                     .and_then(|p| p.file_name())
-                    .map(|n| n.to_string_lossy().to_string())
+                    .map(|n| sanitize_terminal_text(&n.to_string_lossy()))
                     .unwrap_or_else(|| "stdin".to_owned());
                 let mut status = format!("{}  {}%", name, percentage(state));
                 if state.max_h_offset() > 0 {
@@ -398,6 +398,10 @@ fn status_line(state: &PagerState) -> Text<'static> {
             }
         }
     }
+}
+
+fn sanitize_terminal_text(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 fn percentage(state: &PagerState) -> u16 {
@@ -615,5 +619,14 @@ mod tests {
 
         let prefix = prefix_input_for_viewport(&input, 0);
         assert_eq!(prefix.text, "a\n");
+    }
+
+    #[test]
+    fn sanitize_terminal_text_strips_control_sequences() {
+        assert_eq!(
+            sanitize_terminal_text("safe\x1b]52;c;bad\x07name"),
+            "safe]52;c;badname"
+        );
+        assert_eq!(sanitize_terminal_text("line\nbreak"), "linebreak");
     }
 }
