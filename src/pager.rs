@@ -47,6 +47,10 @@ pub struct PagerState {
     /// Maps each visible row → index into `doc.lines`. Rebuilt when folds
     /// change or the document is re-rendered.
     pub visible_indices: Vec<usize>,
+    /// Enhanced lines for the initial viewport. Used by the two-phase UI to
+    /// show syntax/Mermaid in the first screen before the full enhanced render
+    /// completes. Only applies while `offset == 0`.
+    pub viewport_overlay: Option<Vec<Line<'static>>>,
     pub status: String,
 }
 
@@ -93,6 +97,7 @@ impl PagerState {
             line_numbers,
             folded: HashSet::new(),
             visible_indices: Vec::new(),
+            viewport_overlay: None,
             status: String::new(),
         };
         state.rebuild_visible_indices();
@@ -102,6 +107,7 @@ impl PagerState {
     pub fn replace_doc(&mut self, doc: Document, render_options: RenderOptions) {
         self.doc = doc;
         self.render_options = render_options;
+        self.viewport_overlay = None;
         if let Some(s) = &self.search {
             let query = s.query.clone();
             let matches = search_lines(&self.doc.lines, &query);
@@ -171,10 +177,23 @@ impl PagerState {
     }
 
     pub fn visible_lines_panned(&self) -> Vec<Line<'static>> {
+        if self.offset == 0
+            && let Some(lines) = &self.viewport_overlay
+        {
+            return lines
+                .iter()
+                .take(self.height)
+                .map(|line| clip_line(line, self.h_offset, self.width as usize))
+                .collect();
+        }
         self.visible_lines()
             .iter()
             .map(|line| clip_line(line, self.h_offset, self.width as usize))
             .collect()
+    }
+
+    pub fn set_viewport_overlay(&mut self, lines: Vec<Line<'static>>) {
+        self.viewport_overlay = Some(lines);
     }
 
     // -- scrolling -----------------------------------------------------------
@@ -742,6 +761,41 @@ mod tests {
 
         let lines = s.visible_lines_panned();
         assert_eq!(plain(&lines[0]), "45678");
+    }
+
+    #[test]
+    fn viewport_overlay_replaces_top_visible_lines() {
+        let mut s = doc_with_n_lines(5);
+        s.set_viewport_overlay(vec![Line::raw("enhanced 0"), Line::raw("enhanced 1")]);
+
+        let lines = s.visible_lines_panned();
+        assert_eq!(plain(&lines[0]), "enhanced 0");
+        assert_eq!(plain(&lines[1]), "enhanced 1");
+    }
+
+    #[test]
+    fn viewport_overlay_only_applies_at_top() {
+        let mut s = doc_with_n_lines(20);
+        s.set_viewport_overlay(vec![Line::raw("enhanced 0")]);
+        s.scroll_down(1);
+
+        let lines = s.visible_lines_panned();
+        assert_eq!(plain(&lines[0]), "line 1");
+    }
+
+    #[test]
+    fn replace_doc_clears_viewport_overlay() {
+        let mut s = doc_with_n_lines(5);
+        s.set_viewport_overlay(vec![Line::raw("enhanced 0")]);
+        let doc = Document {
+            lines: vec![Line::raw("replacement")],
+            headings: Vec::new(),
+            source_path: None,
+        };
+        s.replace_doc(doc, RenderOptions::default());
+
+        assert!(s.viewport_overlay.is_none());
+        assert_eq!(plain(&s.visible_lines_panned()[0]), "replacement");
     }
 
     #[test]

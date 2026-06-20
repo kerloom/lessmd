@@ -828,6 +828,44 @@ fn perf_startup_two_phase_render() {
 #[test]
 #[ignore]
 #[cfg(feature = "syntax")]
+fn perf_startup_viewport_overlay_render() {
+    println!("\n=== startup: enhanced viewport overlay vs full enhanced render ===");
+    let enhanced = RenderOptions {
+        syntax: true,
+        mermaid: cfg!(feature = "mermaid"),
+    };
+
+    for &n in &[100, 500, 1000] {
+        let md = gen_markdown_with_code_blocks(n);
+        let input = md_input(&md);
+        let prefix = md.lines().take(24 * 20).collect::<Vec<_>>().join("\n") + "\n";
+        let prefix_input = md_input(&prefix);
+
+        lessmd::render::syntax::clear_cache();
+        let overlay_start = Instant::now();
+        let overlay_doc = Document::new_with_options(&prefix_input, 80, enhanced);
+        let overlay_elapsed = overlay_start.elapsed();
+
+        lessmd::render::syntax::clear_cache();
+        let full_start = Instant::now();
+        let full_doc = Document::new_with_options(&input, 80, enhanced);
+        let full_elapsed = full_start.elapsed();
+
+        println!(
+            "  {:>4} blocks | overlay: {:>8} ({:>5} lines) | full: {:>8} ({:>5} lines) | speedup: {:>5.1}x",
+            n,
+            fmt_duration(overlay_elapsed),
+            overlay_doc.lines.len(),
+            fmt_duration(full_elapsed),
+            full_doc.lines.len(),
+            full_elapsed.as_nanos() as f64 / overlay_elapsed.as_nanos().max(1) as f64,
+        );
+    }
+}
+
+#[test]
+#[ignore]
+#[cfg(feature = "syntax")]
 fn perf_syntax_highlight_render() {
     println!("\n=== syntax: render with code blocks ===");
     println!("  feature: ENABLED");

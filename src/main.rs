@@ -24,6 +24,15 @@ use lessmd::pager::{Mode, PagerState};
 use lessmd::render::RenderOptions;
 use lessmd::source::{self, ResolvedMode};
 
+enum EnhancedMsg {
+    Viewport(Vec<Line<'static>>),
+    Full {
+        doc: lessmd::document::Document,
+        width: u16,
+        options: RenderOptions,
+    },
+}
+
 fn main() -> std::io::Result<()> {
     let args = match cli::parse(std::env::args()) {
         Ok(a) => a,
@@ -70,10 +79,26 @@ fn run_app(
         line_numbers,
         initial_options,
     );
-    let (enhanced_tx, enhanced_rx) = mpsc::channel();
+    let (enhanced_tx, enhanced_rx) = mpsc::channel::<EnhancedMsg>();
     if initial_options != render_options {
         let bg_input = input.clone();
         std::thread::spawn(move || {
+            let viewport_input = prefix_input_for_viewport(&bg_input, size.height as usize * 20);
+            let viewport = PagerState::new_with_options(
+                viewport_input,
+                size.height,
+                size.width,
+                line_numbers,
+                render_options,
+            );
+            let overlay: Vec<Line<'static>> = viewport
+                .doc
+                .lines
+                .into_iter()
+                .take(viewport.height)
+                .collect();
+            let _ = enhanced_tx.send(EnhancedMsg::Viewport(overlay));
+
             let enhanced = PagerState::new_with_options(
                 bg_input,
                 size.height,
@@ -81,16 +106,33 @@ fn run_app(
                 line_numbers,
                 render_options,
             );
-            let _ = enhanced_tx.send((enhanced.doc, enhanced.width, render_options));
+            let _ = enhanced_tx.send(EnhancedMsg::Full {
+                doc: enhanced.doc,
+                width: enhanced.width,
+                options: render_options,
+            });
         });
     }
     let mut prev_offset = state.offset;
     loop {
-        if let Ok((doc, width, options)) = enhanced_rx.try_recv() {
-            state.width = width;
-            state.replace_doc(doc, options);
-            state.status = "enhanced render ready".to_owned();
-            terminal.clear()?;
+        while let Ok(msg) = enhanced_rx.try_recv() {
+            match msg {
+                EnhancedMsg::Viewport(lines) => {
+                    state.set_viewport_overlay(lines);
+                    state.status = "enhanced viewport ready".to_owned();
+                    terminal.clear()?;
+                }
+                EnhancedMsg::Full {
+                    doc,
+                    width,
+                    options,
+                } => {
+                    state.width = width;
+                    state.replace_doc(doc, options);
+                    state.status = "enhanced render ready".to_owned();
+                    terminal.clear()?;
+                }
+            }
         }
         // Force a full redraw on multi-line jumps (Ctrl-D/U, PgUp/Dn, g, G)
         // to bypass ratatui's diff optimizer, which can leave stale content.
@@ -122,6 +164,23 @@ fn initial_render_options(input: &source::Input, requested: RenderOptions) -> Re
         }
     } else {
         requested
+    }
+}
+
+fn prefix_input_for_viewport(input: &source::Input, max_source_lines: usize) -> source::Input {
+    let mut text = input
+        .text
+        .lines()
+        .take(max_source_lines.max(1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    source::Input {
+        text,
+        render_mode: input.render_mode.clone(),
+        source_path: input.source_path.clone(),
     }
 }
 
@@ -383,5 +442,30 @@ mod tests {
             initial_render_options(&input(ResolvedMode::Markdown), requested),
             requested
         );
+    }
+
+    #[test]
+    fn prefix_input_keeps_only_requested_source_lines() {
+        let input = source::Input {
+            text: "a\nb\nc\nd".to_owned(),
+            render_mode: ResolvedMode::Markdown,
+            source_path: None,
+        };
+
+        let prefix = prefix_input_for_viewport(&input, 2);
+        assert_eq!(prefix.text, "a\nb\n");
+        assert_eq!(prefix.render_mode, ResolvedMode::Markdown);
+    }
+
+    #[test]
+    fn prefix_input_always_keeps_at_least_one_line() {
+        let input = source::Input {
+            text: "a\nb".to_owned(),
+            render_mode: ResolvedMode::Markdown,
+            source_path: None,
+        };
+
+        let prefix = prefix_input_for_viewport(&input, 0);
+        assert_eq!(prefix.text, "a\n");
     }
 }
