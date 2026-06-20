@@ -295,6 +295,7 @@ impl<'a> MdRenderer<'a> {
             }
             TagEnd::Link => {
                 if let Some(StackEntry::Link(url)) = self.stack.pop() {
+                    let url = sanitize_terminal_text(&url, false);
                     if self.in_cell {
                         self.cell_buf.push_str(&format!(" ({url})"));
                     } else {
@@ -305,6 +306,7 @@ impl<'a> MdRenderer<'a> {
             }
             TagEnd::Image => {
                 if let Some(StackEntry::Image(url)) = self.stack.pop() {
+                    let url = sanitize_terminal_text(&url, false);
                     if self.in_cell {
                         self.cell_buf.push_str(&format!(" ({url})"));
                     } else {
@@ -344,38 +346,47 @@ impl<'a> MdRenderer<'a> {
     // -- inline content ------------------------------------------------------
 
     fn text(&mut self, t: &str) {
+        let text = sanitize_terminal_text(t, self.code_buf.is_some());
         if let Some(buf) = &mut self.code_buf {
-            buf.push_str(t);
+            buf.push_str(&text);
             return;
         }
         if self.in_cell {
-            self.cell_buf.push_str(t);
+            self.cell_buf.push_str(&text);
+            return;
+        }
+        if text.is_empty() {
             return;
         }
         let style = self.current_style();
-        self.pending.push(Span::styled(t.to_owned(), style));
+        self.pending.push(Span::styled(text, style));
     }
 
     fn inline_code(&mut self, t: &str) {
+        let text = sanitize_terminal_text(t, false);
         if self.in_cell {
-            self.cell_buf.push_str(t);
+            self.cell_buf.push_str(&text);
+            return;
+        }
+        if text.is_empty() {
             return;
         }
         let style = self.current_style().fg(Color::Yellow);
-        self.pending.push(Span::styled(t.to_owned(), style));
+        self.pending.push(Span::styled(text, style));
     }
 
     fn html(&mut self, t: &str) {
+        let text = sanitize_terminal_text(t, self.code_buf.is_some());
         if let Some(buf) = &mut self.code_buf {
-            buf.push_str(t);
+            buf.push_str(&text);
             return;
         }
         if self.in_cell {
-            self.cell_buf.push_str(t);
+            self.cell_buf.push_str(&text);
             return;
         }
         let style = self.current_style().dim();
-        for (i, line) in t.split('\n').enumerate() {
+        for (i, line) in text.split('\n').enumerate() {
             if i > 0 {
                 self.flush();
             }
@@ -570,6 +581,7 @@ impl<'a> MdRenderer<'a> {
         if let Some(l) = lang
             && !l.is_empty()
         {
+            let l = sanitize_terminal_text(l, false);
             let mut spans = Vec::new();
             if !prefix.is_empty() {
                 spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
@@ -636,6 +648,7 @@ impl<'a> MdRenderer<'a> {
     }
 
     fn push_rendered_mermaid(&mut self, rendered: &str) {
+        let rendered = sanitize_terminal_text(rendered, true);
         let prefix = self.cont_prefix.clone();
         let avail = self.width.saturating_sub(width_of(&prefix)).max(1);
         let pfx_style = self.prefix_style();
@@ -673,6 +686,7 @@ impl<'a> MdRenderer<'a> {
     }
 
     fn push_mermaid_note(&mut self, err: &str) {
+        let err = sanitize_terminal_text(err, false);
         let prefix = self.cont_prefix.clone();
         let mut spans = Vec::new();
         if !prefix.is_empty() {
@@ -714,6 +728,19 @@ impl<'a> MdRenderer<'a> {
 
 fn width_of(s: &str) -> usize {
     UnicodeWidthStr::width(s)
+}
+
+fn sanitize_terminal_text(text: &str, preserve_newlines: bool) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        match ch {
+            '\n' | '\r' if preserve_newlines => out.push(ch),
+            '\t' => out.push_str("    "),
+            c if !c.is_control() => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn is_mermaid_lang(lang: Option<&str>) -> bool {
@@ -993,6 +1020,14 @@ mod tests {
         }
     }
 
+    struct ControlMermaidRenderer;
+
+    impl MermaidRenderer for ControlMermaidRenderer {
+        fn render(&self, _source: &str) -> Result<String, String> {
+            Ok("safe\x1b[31mred\x07".to_owned())
+        }
+    }
+
     fn plain(line: &Line) -> String {
         let mut s = String::new();
         for span in &line.spans {
@@ -1007,6 +1042,10 @@ mod tests {
 
     fn all_plain(lines: &[Line]) -> String {
         lines.iter().map(plain).collect::<Vec<_>>().join("\n")
+    }
+
+    fn has_control(text: &str) -> bool {
+        text.chars().any(|c| c.is_control() && c != '\n')
     }
 
     #[test]
@@ -1147,6 +1186,22 @@ mod tests {
         assert!(text.contains("fn main() {}"));
     }
 
+    #[test]
+    fn strips_terminal_controls_from_markdown_text() {
+        let lines = render("hello \x1b]52;c;bad\x07 world");
+        let text = all_plain(&lines);
+        assert!(!has_control(&text));
+        assert!(text.contains("hello ]52;c;bad world"));
+    }
+
+    #[test]
+    fn strips_terminal_controls_from_code_blocks() {
+        let lines = render("```text\nsafe\x1b[31mred\x07\n```\n");
+        let text = all_plain(&lines);
+        assert!(!has_control(&text));
+        assert!(text.contains("safe[31mred"));
+    }
+
     #[cfg(feature = "syntax")]
     #[test]
     fn syntax_option_disabled_uses_plain_code_style() {
@@ -1218,6 +1273,16 @@ mod tests {
         let lines = render_markdown_with_mermaid(md, 80, &renderer).lines;
         assert_eq!(lines.len(), 1);
         assert_eq!(plain(&lines[0]), "0123456789abcdef");
+    }
+
+    #[test]
+    fn strips_terminal_controls_from_mermaid_output() {
+        let md = "```mermaid\ngraph LR\nA-->B\n```";
+        let renderer = ControlMermaidRenderer;
+        let out = render_markdown_with_mermaid(md, 80, &renderer);
+        let text = all_plain(&out.lines);
+        assert!(!has_control(&text));
+        assert!(text.contains("safe[31mred"));
     }
 
     #[test]
