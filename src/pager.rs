@@ -38,6 +38,17 @@ pub enum HighlightMode {
     None,
 }
 
+/// Mirrors `less`'s `-e` / `-E` flags.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum QuitAtEof {
+    #[default]
+    Never,
+    /// `-e` / `--quit-at-eof`: exit on the second EOF attempt.
+    SecondAttempt,
+    /// `-E` / `--QUIT-AT-EOF`: exit on the first EOF attempt.
+    FirstAttempt,
+}
+
 #[derive(Debug, Clone)]
 pub struct PagerState {
     /// Kept so we can re-render on width change.
@@ -77,6 +88,11 @@ pub struct PagerState {
     /// completes. Only applies while `offset == 0`.
     pub viewport_overlay: Option<Vec<Line<'static>>>,
     pub status: String,
+    /// `-e` / `-E`: quit when the user tries to scroll past EOF.
+    pub quit_at_eof: QuitAtEof,
+    /// `-q` / `-Q`: suppress the terminal bell (no-op until a bell exists).
+    pub quiet: bool,
+    eof_attempts: u8,
 }
 
 impl PagerState {
@@ -127,6 +143,9 @@ impl PagerState {
             visible_indices: Vec::new(),
             viewport_overlay: None,
             status: String::new(),
+            quit_at_eof: QuitAtEof::default(),
+            quiet: false,
+            eof_attempts: 0,
         };
         state.rebuild_visible_indices();
         state
@@ -231,8 +250,39 @@ impl PagerState {
 
     // -- scrolling -----------------------------------------------------------
 
+    fn at_eof(&self) -> bool {
+        self.offset >= self.max_offset()
+    }
+
+    fn note_forward_scroll(&mut self, before: usize) {
+        if before == self.offset && self.at_eof() {
+            self.on_eof_attempt();
+        } else {
+            self.eof_attempts = 0;
+        }
+    }
+
+    fn on_eof_attempt(&mut self) {
+        match self.quit_at_eof {
+            QuitAtEof::Never => {}
+            QuitAtEof::SecondAttempt => {
+                self.eof_attempts = self.eof_attempts.saturating_add(1);
+                if self.eof_attempts >= 2 {
+                    self.quit = true;
+                }
+            }
+            QuitAtEof::FirstAttempt => self.quit = true,
+        }
+        let _ = self.quiet;
+    }
+
     pub fn scroll_down(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let before = self.offset;
         self.offset = (self.offset + n).min(self.max_offset());
+        self.note_forward_scroll(before);
     }
 
     pub fn scroll_up(&mut self, n: usize) {
@@ -249,11 +299,16 @@ impl PagerState {
 
     /// `N f` / `N Space` — page down N times.
     pub fn page_down_n(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let before = self.offset;
         let step = self.height.saturating_sub(1).max(1);
         self.offset = self
             .offset
             .saturating_add(step.saturating_mul(n))
             .min(self.max_offset());
+        self.note_forward_scroll(before);
     }
 
     /// `N b` — page up N times.
@@ -274,11 +329,16 @@ impl PagerState {
 
     /// `N Ctrl-D` — half-page down N times.
     pub fn half_page_down_n(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let before = self.offset;
         let step = self.height / 2;
         self.offset = self
             .offset
             .saturating_add(step.saturating_mul(n))
             .min(self.max_offset());
+        self.note_forward_scroll(before);
     }
 
     /// `N Ctrl-U` — half-page up N times.
@@ -315,7 +375,9 @@ impl PagerState {
     }
 
     pub fn goto_bottom(&mut self) {
+        let before = self.offset;
         self.offset = self.max_offset();
+        self.note_forward_scroll(before);
     }
 
     pub fn scroll_right(&mut self, n: usize) {
@@ -1709,5 +1771,37 @@ mod tests {
         }
         s.finalize_search();
         assert_eq!(s.search.as_ref().unwrap().current, 0);
+    }
+
+    #[test]
+    fn quit_at_eof_first_attempt_exits_on_scroll_past_eof() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.quit_at_eof = QuitAtEof::FirstAttempt;
+        s.goto_bottom();
+        assert!(!s.quit);
+        s.scroll_down(1);
+        assert!(s.quit);
+    }
+
+    #[test]
+    fn quit_at_eof_second_attempt_requires_two_eof_scrolls() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.quit_at_eof = QuitAtEof::SecondAttempt;
+        s.goto_bottom();
+        s.scroll_down(1);
+        assert!(!s.quit);
+        s.scroll_down(1);
+        assert!(s.quit);
+    }
+
+    #[test]
+    fn quit_at_eof_resets_after_scrolling_away_from_eof() {
+        let mut s = make_state(&"a\n".repeat(50), 24, 80);
+        s.quit_at_eof = QuitAtEof::SecondAttempt;
+        s.goto_bottom();
+        s.scroll_down(1);
+        s.scroll_up(1);
+        s.scroll_down(1);
+        assert!(!s.quit);
     }
 }

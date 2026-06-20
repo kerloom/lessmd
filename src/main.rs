@@ -62,6 +62,8 @@ struct AppOptions {
     case_mode: lessmd::search::CaseMode,
     highlight: lessmd::pager::HighlightMode,
     initial_command: Option<cli::InitialCommand>,
+    quiet: bool,
+    quit_at_eof: lessmd::pager::QuitAtEof,
 }
 
 fn main() -> std::io::Result<()> {
@@ -91,6 +93,8 @@ fn main() -> std::io::Result<()> {
         case_mode: args.case_mode,
         highlight: args.highlight,
         initial_command: args.initial_command,
+        quiet: args.quiet,
+        quit_at_eof: args.quit_at_eof,
     };
     let input = match source::read(args.path.as_deref(), args.mode) {
         Ok(i) => i,
@@ -129,6 +133,8 @@ fn run_app(
     state.input = input.clone();
     state.set_case_mode(options.case_mode);
     state.set_highlight(options.highlight);
+    state.quiet = options.quiet;
+    state.quit_at_eof = options.quit_at_eof;
     if let Some(command) = &options.initial_command {
         apply_initial_command(&mut state, command);
     }
@@ -460,7 +466,7 @@ fn status_line(state: &PagerState) -> Text<'static> {
                 }
                 Text::from(Line::from(vec![
                     Span::raw(status),
-                    Span::styled("  ? help", Style::default().fg(Color::Gray)),
+                    Span::styled("  Press H for help", Style::default().fg(Color::Gray)),
                 ]))
             }
         }

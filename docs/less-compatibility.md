@@ -81,7 +81,7 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 - `|X cmd` (pipe to shell)
 - `s file` (save input)
 - `v` (edit current file via `$VISUAL` / `$EDITOR`)
-- `+cmd` forms beyond `+G`, `+N`, `+/pattern`, `+?pattern`
+- `+cmd` forms beyond `+G`, `+N`, `+/pattern`, `+?pattern` (basic set implemented)
 
 ## Command-line options
 
@@ -98,6 +98,10 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 | `-g` / `--hilite-search` | `-g` / `--hilite-search` | ✅ just added (only current match) |
 | `-G` / `--HILITE-SEARCH` | `-G` / `--HILITE-SEARCH` | ✅ just added (no highlight) |
 | `-K` / `--quit-on-intr` | `-K` / `--quit-on-intr` | Ctrl-C exits even from prompts |
+| `-p pattern` / `--pattern` | `-p` / `--pattern` | start at first match |
+| `-e` / `--quit-at-eof` | `-e` / `--quit-at-eof` | exit on 2nd EOF attempt |
+| `-E` / `--QUIT-AT-EOF` | `-E` / `--QUIT-AT-EOF` | exit on 1st EOF attempt |
+| `-q` / `-Q` / `--quiet` | `-q` / `-Q` / `--quiet` | no bell (no-op today) |
 | — | `--markdown` / `--plain` | ours |
 | — | `--no-syntax` / `--no-mermaid` | ours |
 
@@ -105,9 +109,6 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 
 **Low** (~1-line flags, ≤20 LOC each)
 
-- `-e` / `--quit-at-eof` (auto-exit on 2nd EOF)
-- `-E` / `--QUIT-AT-EOF` (auto-exit on 1st EOF)
-- `-q` / `-Q` / `--quiet` (silence bell)
 - `-X` / `--no-init` (skip termcap init/deinit)
 - `-c` / `-C` / `--clear-screen` (repaint by clearing)
 - `-f` / `--force` (open non-regular files)
@@ -129,7 +130,6 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 - `-h N` / `--max-back-scroll`
 - `-z N` / `--window`
 - `-w` / `-W` / `--hilite-unread`
-- `-p pattern` / `--pattern` (start at pattern) — **medium LoE**
 - `-o file` / `-O file` / `--log-file` (log to file)
 - `--incsearch` (search as you type)
 
@@ -176,14 +176,14 @@ The biggest **methodology** gap is end-to-end TUI testing:
 - [x] `r` / `Ctrl-L` / `Ctrl-R` repaint
 - [x] Numbered command args for movement/search (`5j`, `10G`, `50%`, `2/pat`)
 - [x] `+cmd` initial commands (`+G`, `+N`, `+/pat`, `+?pat`)
-- [ ] `-e` / `-E` (auto-exit on EOF)
+- [x] `-e` / `-E` (auto-exit on EOF)
 - [x] `-K` (Ctrl-C exits even from prompts)
-- [ ] `-q` / `-Q` (silence bell)
+- [x] `-q` / `-Q` (silence bell)
 
 **Medium-low (deferred per "even skip medium-low"):**
 
 - [x] `?` backward search with direction-aware `n`/`N`
-- [ ] `-p pattern` / `--pattern` (initial command)
+- [x] `-p pattern` / `--pattern` (initial command)
 - [ ] `-S` (chop long lines)
 - [ ] `-a` / `-A` (search-skip-screen)
 - [ ] `-j N` (jump target)

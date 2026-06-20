@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-pub use crate::pager::HighlightMode;
+use crate::pager::{HighlightMode, QuitAtEof};
 pub use crate::search::CaseMode;
 use crate::search::SearchDirection;
 
@@ -26,6 +26,12 @@ pub struct Args {
     pub highlight: HighlightMode,
     /// Initial `+cmd` to execute after loading the file.
     pub initial_command: Option<InitialCommand>,
+    /// `-q` / `-Q` / `--quiet`: suppress the terminal bell on errors.
+    pub quiet: bool,
+    /// `-e` / `-E`: auto-exit when the user tries to scroll past EOF.
+    pub quit_at_eof: crate::pager::QuitAtEof,
+    /// `-p` / `--pattern`: start at the first forward match for this pattern.
+    pub pattern: Option<String>,
 }
 
 impl Args {
@@ -79,6 +85,10 @@ Options:
   -I, --IGNORE-CASE  Ignore case in all searches.
   -g, --hilite-search  Highlight only the current search match.
   -G, --HILITE-SEARCH  Suppress all search-match highlighting.
+  -p, --pattern     Start at the first match for PATTERN.
+  -e, --quit-at-eof Exit on the second attempt to scroll past EOF.
+  -E, --QUIT-AT-EOF Exit on the first attempt to scroll past EOF.
+  -q, --quiet       Suppress the terminal bell.
   -h, --help        Show this help text and exit.
   -V, --version     Show version and exit.
 
@@ -119,14 +129,17 @@ Keybindings (inside the pager):
 /// Parse program arguments (the iterator must include the program name as
 /// the first element, as returned by `std::env::args`).
 pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
-    let args = args.skip(1);
+    let args: Vec<String> = args.skip(1).collect();
     let mut out = Args::new();
     let mut positional: Vec<String> = Vec::new();
     let mut only_positional = false;
+    let mut index = 0;
 
-    for arg in args {
+    while index < args.len() {
+        let arg = &args[index];
         if only_positional {
-            positional.push(arg);
+            positional.push(arg.clone());
+            index += 1;
             continue;
         }
         match arg.as_str() {
@@ -141,6 +154,9 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
             "-I" | "--IGNORE-CASE" => out.case_mode = CaseMode::Insensitive,
             "-g" | "--hilite-search" => out.highlight = HighlightMode::Last,
             "-G" | "--HILITE-SEARCH" => out.highlight = HighlightMode::None,
+            "-q" | "-Q" | "--quiet" => out.quiet = true,
+            "-e" | "--quit-at-eof" => out.quit_at_eof = QuitAtEof::SecondAttempt,
+            "-E" | "--QUIT-AT-EOF" => out.quit_at_eof = QuitAtEof::FirstAttempt,
             "-h" | "--help" => out.show_help = true,
             "-V" | "--version" => out.show_version = true,
             "--" => only_positional = true,
@@ -148,10 +164,33 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
             s if s.starts_with('+') && s.len() > 1 => {
                 out.initial_command = Some(parse_initial_command(s)?);
             }
+            s if s.starts_with("--pattern=") => {
+                out.pattern = Some(s["--pattern=".len()..].to_owned());
+            }
+            "-p" | "--pattern" => {
+                index += 1;
+                let pattern = args
+                    .get(index)
+                    .ok_or_else(|| format!("{arg} requires a pattern argument"))?;
+                out.pattern = Some(pattern.clone());
+            }
+            s if s.starts_with("-p") && s.len() > 2 => {
+                out.pattern = Some(s[2..].to_owned());
+            }
             s if s.starts_with("--") => return Err(format!("unknown option: {s}")),
             s if s.starts_with('-') && s.len() > 1 => return Err(format!("unknown option: {s}")),
             s => positional.push(s.to_owned()),
         }
+        index += 1;
+    }
+
+    if out.initial_command.is_none()
+        && let Some(pattern) = out.pattern.take()
+    {
+        out.initial_command = Some(InitialCommand::Search {
+            query: pattern,
+            direction: SearchDirection::Forward,
+        });
     }
 
     match positional.len() {
@@ -325,6 +364,85 @@ mod tests {
     #[test]
     fn unknown_option_errors() {
         let argv = vec!["lessmd".to_owned(), "--nope".to_owned()];
+        assert!(parse(argv.into_iter()).is_err());
+    }
+
+    #[test]
+    fn quiet_flags() {
+        assert!(parse_args(&["-q", "x"]).quiet);
+        assert!(parse_args(&["-Q", "x"]).quiet);
+        assert!(parse_args(&["--quiet", "x"]).quiet);
+        assert!(!parse_args(&["x"]).quiet);
+    }
+
+    #[test]
+    fn quit_at_eof_flags() {
+        use crate::pager::QuitAtEof;
+        assert_eq!(parse_args(&["x"]).quit_at_eof, QuitAtEof::Never);
+        assert_eq!(
+            parse_args(&["-e", "x"]).quit_at_eof,
+            QuitAtEof::SecondAttempt
+        );
+        assert_eq!(
+            parse_args(&["--quit-at-eof", "x"]).quit_at_eof,
+            QuitAtEof::SecondAttempt
+        );
+        assert_eq!(
+            parse_args(&["-E", "x"]).quit_at_eof,
+            QuitAtEof::FirstAttempt
+        );
+        assert_eq!(
+            parse_args(&["--QUIT-AT-EOF", "x"]).quit_at_eof,
+            QuitAtEof::FirstAttempt
+        );
+    }
+
+    #[test]
+    fn pattern_flag_sets_initial_search() {
+        assert_eq!(
+            parse_args(&["-p", "foo", "x"]).initial_command,
+            Some(InitialCommand::Search {
+                query: "foo".to_owned(),
+                direction: SearchDirection::Forward,
+            })
+        );
+        assert_eq!(
+            parse_args(&["-pfoo", "x"]).initial_command,
+            Some(InitialCommand::Search {
+                query: "foo".to_owned(),
+                direction: SearchDirection::Forward,
+            })
+        );
+        assert_eq!(
+            parse_args(&["--pattern", "bar", "x"]).initial_command,
+            Some(InitialCommand::Search {
+                query: "bar".to_owned(),
+                direction: SearchDirection::Forward,
+            })
+        );
+        assert_eq!(
+            parse_args(&["--pattern=baz", "x"]).initial_command,
+            Some(InitialCommand::Search {
+                query: "baz".to_owned(),
+                direction: SearchDirection::Forward,
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_initial_command_wins_over_pattern() {
+        assert_eq!(
+            parse_args(&["+/foo", "-p", "bar", "x"]).initial_command,
+            Some(InitialCommand::Search {
+                query: "foo".to_owned(),
+                direction: SearchDirection::Forward,
+            })
+        );
+    }
+
+    #[test]
+    fn pattern_flag_requires_argument() {
+        let argv = vec!["lessmd".to_owned(), "-p".to_owned()];
         assert!(parse(argv.into_iter()).is_err());
     }
 }
