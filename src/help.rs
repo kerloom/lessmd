@@ -13,8 +13,8 @@ pub fn help_text() -> Text<'static> {
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
     let entries: [(&str, &str); 24] = [
-        ("j / e / v", "scroll down N lines (1 if no count)"),
-        ("k / y / ^", "scroll up N lines (1 if no count)"),
+        ("j / e / Down", "scroll down N lines (1 if no count)"),
+        ("k / y / Up", "scroll up N lines (1 if no count)"),
         ("h / <-", "pan left N columns (8 if no count)"),
         ("l / ->", "pan right N columns (8 if no count)"),
         ("Space / f / PgDn", "scroll down N pages"),

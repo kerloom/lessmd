@@ -67,8 +67,8 @@ lessmd -N docs/lessmd.md
 
 | Action | Keys |
 | --- | --- |
-| Scroll down | `j`, `e`, `Ctrl-N`, Down |
-| Scroll up | `k`, `y`, `Ctrl-P`, Up |
+| Scroll down | `j`, `e`, Down |
+| Scroll up | `k`, `y`, Up |
 | Page down | Space, `f`, PageDown |
 | Page up | `b`, PageUp |
 | Half page down | `Ctrl-D` |
