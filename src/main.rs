@@ -25,12 +25,27 @@ use lessmd::render::RenderOptions;
 use lessmd::source::{self, ResolvedMode};
 
 enum EnhancedMsg {
-    Viewport(Vec<Line<'static>>),
+    Viewport {
+        generation: u64,
+        lines: Vec<Line<'static>>,
+    },
     Full {
+        generation: u64,
         doc: lessmd::document::Document,
         width: u16,
         options: RenderOptions,
     },
+}
+
+struct BackgroundRenderJob {
+    input: source::Input,
+    height: u16,
+    width: u16,
+    line_numbers: bool,
+    current_options: RenderOptions,
+    requested_options: RenderOptions,
+    prefix_source_lines: usize,
+    generation: u64,
 }
 
 fn main() -> std::io::Result<()> {
@@ -90,55 +105,44 @@ fn run_app(
     // may be a prefix, but the state should know about the real source.
     state.input = input.clone();
     let (enhanced_tx, enhanced_rx) = mpsc::channel::<EnhancedMsg>();
+    let mut render_generation = 0;
     if use_prefix || initial_options != render_options {
-        let bg_input = input.clone();
-        std::thread::spawn(move || {
-            if initial_options != render_options {
-                let viewport_input = prefix_input_for_viewport(&bg_input, prefix_source_lines);
-                let viewport = PagerState::new_with_options(
-                    viewport_input,
-                    size.height,
-                    size.width,
-                    line_numbers,
-                    render_options,
-                );
-                let overlay: Vec<Line<'static>> = viewport
-                    .doc
-                    .lines
-                    .into_iter()
-                    .take(viewport.height)
-                    .collect();
-                let _ = enhanced_tx.send(EnhancedMsg::Viewport(overlay));
-            }
-
-            let enhanced = PagerState::new_with_options(
-                bg_input,
-                size.height,
-                size.width,
+        render_generation += 1;
+        spawn_background_render(
+            enhanced_tx.clone(),
+            BackgroundRenderJob {
+                input: input.clone(),
+                height: size.height,
+                width: size.width,
                 line_numbers,
-                render_options,
-            );
-            let _ = enhanced_tx.send(EnhancedMsg::Full {
-                doc: enhanced.doc,
-                width: enhanced.width,
-                options: render_options,
-            });
-        });
+                current_options: initial_options,
+                requested_options: render_options,
+                prefix_source_lines,
+                generation: render_generation,
+            },
+        );
     }
     let mut prev_offset = state.offset;
     loop {
         while let Ok(msg) = enhanced_rx.try_recv() {
             match msg {
-                EnhancedMsg::Viewport(lines) => {
+                EnhancedMsg::Viewport { generation, lines } => {
+                    if generation != render_generation {
+                        continue;
+                    }
                     state.set_viewport_overlay(lines);
                     state.status = "enhanced viewport ready".to_owned();
                     terminal.clear()?;
                 }
                 EnhancedMsg::Full {
+                    generation,
                     doc,
                     width,
                     options,
                 } => {
+                    if generation != render_generation {
+                        continue;
+                    }
                     state.width = width;
                     state.replace_doc(doc, options);
                     state.status = "enhanced render ready".to_owned();
@@ -161,11 +165,68 @@ fn run_app(
                         return Ok(());
                     }
                 }
-                Event::Resize(w, h) => state.resize(h, w),
+                Event::Resize(w, h) => {
+                    render_generation += 1;
+                    state.resize(h, w);
+                    if state.render_options != render_options {
+                        spawn_background_render(
+                            enhanced_tx.clone(),
+                            BackgroundRenderJob {
+                                input: state.input.clone(),
+                                height: h,
+                                width: w,
+                                line_numbers,
+                                current_options: state.render_options,
+                                requested_options: render_options,
+                                prefix_source_lines: prefix_source_lines_for_height(h),
+                                generation: render_generation,
+                            },
+                        );
+                    }
+                }
                 _ => {}
             }
         }
     }
+}
+
+fn spawn_background_render(enhanced_tx: mpsc::Sender<EnhancedMsg>, job: BackgroundRenderJob) {
+    std::thread::spawn(move || {
+        if job.current_options != job.requested_options {
+            let viewport_input = prefix_input_for_viewport(&job.input, job.prefix_source_lines);
+            let viewport = PagerState::new_with_options(
+                viewport_input,
+                job.height,
+                job.width,
+                job.line_numbers,
+                job.requested_options,
+            );
+            let overlay: Vec<Line<'static>> = viewport
+                .doc
+                .lines
+                .into_iter()
+                .take(viewport.height)
+                .collect();
+            let _ = enhanced_tx.send(EnhancedMsg::Viewport {
+                generation: job.generation,
+                lines: overlay,
+            });
+        }
+
+        let enhanced = PagerState::new_with_options(
+            job.input,
+            job.height,
+            job.width,
+            job.line_numbers,
+            job.requested_options,
+        );
+        let _ = enhanced_tx.send(EnhancedMsg::Full {
+            generation: job.generation,
+            doc: enhanced.doc,
+            width: enhanced.width,
+            options: job.requested_options,
+        });
+    });
 }
 
 fn initial_render_options(input: &source::Input, requested: RenderOptions) -> RenderOptions {

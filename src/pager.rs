@@ -243,6 +243,7 @@ impl PagerState {
     // -- resize --------------------------------------------------------------
 
     pub fn resize(&mut self, height: u16, width: u16) {
+        self.viewport_overlay = None;
         self.height = height.saturating_sub(1).max(1) as usize;
         let wrap_width = width.saturating_sub(1).max(1);
         let content_width = if self.line_numbers {
@@ -796,6 +797,16 @@ mod tests {
 
         assert!(s.viewport_overlay.is_none());
         assert_eq!(plain(&s.visible_lines_panned()[0]), "replacement");
+    }
+
+    #[test]
+    fn resize_clears_viewport_overlay() {
+        let mut s = doc_with_n_lines(5);
+        s.set_viewport_overlay(vec![Line::raw("enhanced 0")]);
+        s.resize(10, 80);
+
+        assert!(s.viewport_overlay.is_none());
+        assert_eq!(plain(&s.visible_lines_panned()[0]), "line 0");
     }
 
     #[test]

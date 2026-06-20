@@ -3,6 +3,11 @@
 //! The markdown renderer depends on the small trait in this module, keeping the
 //! concrete `figurehead` dependency optional and easy to replace in tests.
 
+#[cfg(feature = "mermaid")]
+use std::collections::HashMap;
+#[cfg(feature = "mermaid")]
+use std::sync::{LazyLock, Mutex};
+
 /// Converts Mermaid source into terminal-friendly text.
 pub trait MermaidRenderer {
     fn render(&self, source: &str) -> Result<String, String>;
@@ -14,14 +19,61 @@ pub struct DefaultMermaidRenderer;
 #[cfg(feature = "mermaid")]
 impl MermaidRenderer for DefaultMermaidRenderer {
     fn render(&self, source: &str) -> Result<String, String> {
-        match render_with_figurehead(source) {
+        if let Some(cached) = cache_get(source) {
+            return cached;
+        }
+
+        let result = match render_with_figurehead(source) {
             Ok(rendered) => Ok(rendered),
             Err(first_err) => match sanitize_sequence(source) {
                 Some(sanitized) => render_with_figurehead(&sanitized).map_err(|_| first_err),
                 None => Err(first_err),
             },
-        }
+        };
+        cache_insert(source.to_owned(), result.clone());
+        result
     }
+}
+
+#[cfg(feature = "mermaid")]
+const MAX_CACHE_ENTRIES: usize = 128;
+
+#[cfg(feature = "mermaid")]
+type MermaidCache = HashMap<String, Result<String, String>>;
+
+#[cfg(feature = "mermaid")]
+static MERMAID_CACHE: LazyLock<Mutex<MermaidCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(feature = "mermaid")]
+fn cache_get(source: &str) -> Option<Result<String, String>> {
+    MERMAID_CACHE
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(source).cloned())
+}
+
+#[cfg(feature = "mermaid")]
+fn cache_insert(source: String, result: Result<String, String>) {
+    if let Ok(mut cache) = MERMAID_CACHE.lock() {
+        if cache.len() >= MAX_CACHE_ENTRIES {
+            cache.clear();
+        }
+        cache.insert(source, result);
+    }
+}
+
+/// Clear the Mermaid render cache. Useful for tests and document switches.
+#[cfg(feature = "mermaid")]
+pub fn clear_cache() {
+    if let Ok(mut cache) = MERMAID_CACHE.lock() {
+        cache.clear();
+    }
+}
+
+#[cfg(feature = "mermaid")]
+#[cfg(test)]
+fn cache_len() -> usize {
+    MERMAID_CACHE.lock().map(|cache| cache.len()).unwrap_or(0)
 }
 
 #[cfg(feature = "mermaid")]
@@ -108,6 +160,12 @@ impl MermaidRenderer for DefaultMermaidRenderer {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "mermaid")]
+    fn cache_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
     struct MockRenderer;
 
     impl MermaidRenderer for MockRenderer {
@@ -128,6 +186,8 @@ mod tests {
     #[cfg(feature = "mermaid")]
     #[test]
     fn figurehead_renders_simple_flowchart() {
+        let _guard = cache_test_lock();
+        clear_cache();
         let renderer = DefaultMermaidRenderer;
         let output = renderer.render("graph LR\nA[Start] --> B[End]").unwrap();
         assert!(!output.trim().is_empty());
@@ -137,12 +197,45 @@ mod tests {
     #[cfg(feature = "mermaid")]
     #[test]
     fn figurehead_renders_sequence_diagram() {
+        let _guard = cache_test_lock();
+        clear_cache();
         let renderer = DefaultMermaidRenderer;
         let output = renderer
             .render("sequenceDiagram\nAlice->>Bob: Hello")
             .unwrap();
         assert!(!output.trim().is_empty());
         assert!(output.contains("Alice") || output.contains("Bob") || output.contains('─'));
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn default_renderer_caches_mermaid_results() {
+        let _guard = cache_test_lock();
+        clear_cache();
+        let renderer = DefaultMermaidRenderer;
+        let source = "graph LR\nA[Start] --> B[End]";
+
+        let first = renderer.render(source).unwrap();
+        assert_eq!(cache_get(source).unwrap().unwrap(), first);
+        let second = renderer.render(source).unwrap();
+
+        assert_eq!(second, first);
+        assert_eq!(cache_get(source).unwrap().unwrap(), first);
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn mermaid_cache_clears_when_entry_limit_is_exceeded() {
+        let _guard = cache_test_lock();
+        clear_cache();
+        for i in 0..MAX_CACHE_ENTRIES {
+            cache_insert(format!("source {i}"), Ok(format!("rendered {i}")));
+        }
+        assert_eq!(cache_len(), MAX_CACHE_ENTRIES);
+
+        cache_insert("overflow".to_owned(), Ok("rendered overflow".to_owned()));
+
+        assert_eq!(cache_get("overflow").unwrap().unwrap(), "rendered overflow");
     }
 
     #[cfg(feature = "mermaid")]
