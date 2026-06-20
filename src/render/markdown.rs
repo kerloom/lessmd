@@ -12,15 +12,23 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use super::RenderOutput;
 use super::mermaid::{DefaultMermaidRenderer, MermaidRenderer};
 use super::text::wrap_line;
+use super::{RenderOptions, RenderOutput};
 use crate::document::Heading;
 
 /// Render markdown `text` into a flat list of terminal lines wrapped to `width`.
 pub fn render_markdown(text: &str, width: u16) -> RenderOutput {
+    render_markdown_with_options(text, width, RenderOptions::default())
+}
+
+pub fn render_markdown_with_options(
+    text: &str,
+    width: u16,
+    options: RenderOptions,
+) -> RenderOutput {
     let renderer = DefaultMermaidRenderer;
-    render_markdown_with_mermaid(text, width, &renderer)
+    render_markdown_with_mermaid_and_options(text, width, &renderer, options)
 }
 
 /// Render markdown with an injected Mermaid renderer.
@@ -29,12 +37,21 @@ pub fn render_markdown_with_mermaid(
     width: u16,
     mermaid: &dyn MermaidRenderer,
 ) -> RenderOutput {
+    render_markdown_with_mermaid_and_options(text, width, mermaid, RenderOptions::default())
+}
+
+pub fn render_markdown_with_mermaid_and_options(
+    text: &str,
+    width: u16,
+    mermaid: &dyn MermaidRenderer,
+    options: RenderOptions,
+) -> RenderOutput {
     let opts = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_SMART_PUNCTUATION;
     let parser = Parser::new_ext(text, opts);
-    let mut r = MdRenderer::new(width.max(1) as usize, mermaid);
+    let mut r = MdRenderer::new(width.max(1) as usize, mermaid, options);
     for event in parser {
         r.handle(event);
     }
@@ -72,6 +89,7 @@ struct TableBuilder {
 struct MdRenderer<'a> {
     width: usize,
     mermaid: &'a dyn MermaidRenderer,
+    options: RenderOptions,
     out: Vec<Line<'static>>,
     pending: Vec<Span<'static>>,
     /// Base style for the current block (heading color, blockquote dim, ...).
@@ -96,10 +114,11 @@ struct MdRenderer<'a> {
 }
 
 impl<'a> MdRenderer<'a> {
-    fn new(width: usize, mermaid: &'a dyn MermaidRenderer) -> Self {
+    fn new(width: usize, mermaid: &'a dyn MermaidRenderer, options: RenderOptions) -> Self {
         Self {
             width,
             mermaid,
+            options,
             out: Vec::new(),
             pending: Vec::new(),
             block_style: Style::default(),
@@ -480,7 +499,7 @@ impl<'a> MdRenderer<'a> {
     fn flush_code_block(&mut self) {
         let code = self.code_buf.take().unwrap_or_default();
         let lang = self.code_lang.take();
-        if is_mermaid_lang(lang.as_deref()) {
+        if self.options.mermaid && is_mermaid_lang(lang.as_deref()) {
             self.flush_mermaid_block(&code);
             return;
         }
@@ -521,10 +540,14 @@ impl<'a> MdRenderer<'a> {
         let highlighted: Option<Vec<Line<'static>>> = {
             #[cfg(feature = "syntax")]
             {
-                lang.and_then(|l| {
-                    let token = l.split_whitespace().next().unwrap_or("");
-                    super::syntax::highlight_code(code, token)
-                })
+                if self.options.syntax {
+                    lang.and_then(|l| {
+                        let token = l.split_whitespace().next().unwrap_or("");
+                        super::syntax::highlight_code(code, token)
+                    })
+                } else {
+                    None
+                }
             }
             #[cfg(not(feature = "syntax"))]
             {
@@ -552,7 +575,10 @@ impl<'a> MdRenderer<'a> {
                         .push(prefix_line(&prefix, self.quote_depth, pfx_style));
                     continue;
                 }
-                let wrapped = wrap_line(&Line::styled(line.to_owned(), code_style), avail);
+                let wrapped = wrap_line(
+                    &Line::from(vec![Span::styled(line.to_owned(), code_style)]),
+                    avail,
+                );
                 for wl in &wrapped {
                     let mut spans = Vec::new();
                     if !prefix.is_empty() {
@@ -1032,6 +1058,47 @@ mod tests {
         let text = all_plain(&lines);
         assert!(text.contains("rust"));
         assert!(text.contains("fn main() {}"));
+    }
+
+    #[cfg(feature = "syntax")]
+    #[test]
+    fn syntax_option_disabled_uses_plain_code_style() {
+        let md = "```rust\nfn main() {}\n```";
+        let out = render_markdown_with_options(
+            md,
+            80,
+            RenderOptions {
+                syntax: false,
+                mermaid: true,
+            },
+        );
+        let code_span = out
+            .lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .find(|s| s.content.contains("fn"))
+            .unwrap();
+        assert_eq!(code_span.style.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn mermaid_option_disabled_renders_plain_codeblock() {
+        let md = "```mermaid\ngraph LR\nA-->B\n```";
+        let renderer = OkMermaidRenderer;
+        let out = render_markdown_with_mermaid_and_options(
+            md,
+            80,
+            &renderer,
+            RenderOptions {
+                syntax: false,
+                mermaid: false,
+            },
+        );
+        let text = all_plain(&out.lines);
+        assert!(text.contains("┌─ mermaid"));
+        assert!(text.contains("A-->B"));
+        assert!(!text.contains("mock diagram"));
+        assert!(!text.contains("mermaid render failed:"));
     }
 
     #[test]

@@ -35,6 +35,8 @@ use std::time::{Duration, Instant};
 
 use lessmd::document::Document;
 use lessmd::pager::PagerState;
+#[cfg(feature = "syntax")]
+use lessmd::render::RenderOptions;
 use lessmd::render::markdown::render_markdown;
 use lessmd::render::mermaid::{DefaultMermaidRenderer, MermaidRenderer};
 use lessmd::render::text::render_text;
@@ -782,6 +784,45 @@ fn gen_markdown_with_code_blocks(n: usize) -> String {
         ));
     }
     md
+}
+
+#[test]
+#[ignore]
+#[cfg(feature = "syntax")]
+fn perf_startup_two_phase_render() {
+    println!("\n=== startup: full enhanced vs plain-first render ===");
+    let enhanced = RenderOptions {
+        syntax: true,
+        mermaid: cfg!(feature = "mermaid"),
+    };
+    let plain_first = RenderOptions {
+        syntax: false,
+        mermaid: false,
+    };
+
+    for &n in &[10, 100, 500] {
+        let md = gen_markdown_with_code_blocks(n);
+        let input = md_input(&md);
+
+        let plain_start = Instant::now();
+        let plain_doc = Document::new_with_options(&input, 80, plain_first);
+        let plain_elapsed = plain_start.elapsed();
+
+        lessmd::render::syntax::clear_cache();
+        let enhanced_start = Instant::now();
+        let enhanced_doc = Document::new_with_options(&input, 80, enhanced);
+        let enhanced_elapsed = enhanced_start.elapsed();
+
+        println!(
+            "  {:>4} blocks | plain-first: {:>8} | full enhanced: {:>8} | first paint speedup: {:>5.1}x | lines {}/{}",
+            n,
+            fmt_duration(plain_elapsed),
+            fmt_duration(enhanced_elapsed),
+            enhanced_elapsed.as_nanos() as f64 / plain_elapsed.as_nanos().max(1) as f64,
+            plain_doc.lines.len(),
+            enhanced_doc.lines.len(),
+        );
+    }
 }
 
 #[test]

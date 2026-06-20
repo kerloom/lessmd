@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::document::Document;
+use crate::render::RenderOptions;
 use crate::search::{SearchState, search_lines};
 use crate::source::Input;
 
@@ -25,6 +26,7 @@ pub enum Mode {
 pub struct PagerState {
     /// Kept so we can re-render on width change.
     pub input: Input,
+    pub render_options: RenderOptions,
     pub doc: Document,
     /// Index of the first visible line.
     pub offset: usize,
@@ -56,9 +58,19 @@ impl PagerState {
     /// When `line_numbers` is true, the wrap width is further narrowed by
     /// the gutter width so line numbers don't reduce the visible content.
     pub fn new(input: Input, height: u16, width: u16, line_numbers: bool) -> Self {
+        Self::new_with_options(input, height, width, line_numbers, RenderOptions::default())
+    }
+
+    pub fn new_with_options(
+        input: Input,
+        height: u16,
+        width: u16,
+        line_numbers: bool,
+        render_options: RenderOptions,
+    ) -> Self {
         let viewport = height.saturating_sub(1).max(1) as usize;
         let wrap_width = width.saturating_sub(1).max(1);
-        let doc = render_doc(&input, wrap_width, line_numbers);
+        let doc = render_doc(&input, wrap_width, line_numbers, render_options);
         let content_width = if line_numbers {
             wrap_width.saturating_sub(gutter_width(doc.line_count()) as u16)
         } else {
@@ -66,6 +78,7 @@ impl PagerState {
         };
         let mut state = Self {
             input,
+            render_options,
             doc,
             offset: 0,
             h_offset: 0,
@@ -84,6 +97,28 @@ impl PagerState {
         };
         state.rebuild_visible_indices();
         state
+    }
+
+    pub fn replace_doc(&mut self, doc: Document, render_options: RenderOptions) {
+        self.doc = doc;
+        self.render_options = render_options;
+        if let Some(s) = &self.search {
+            let query = s.query.clone();
+            let matches = search_lines(&self.doc.lines, &query);
+            let current = if matches.is_empty() {
+                0
+            } else {
+                s.current.min(matches.len() - 1)
+            };
+            self.search = Some(SearchState {
+                query,
+                matches,
+                current,
+            });
+        }
+        self.rebuild_visible_indices();
+        self.offset = self.offset.min(self.max_offset());
+        self.h_offset = self.h_offset.min(self.max_h_offset());
     }
 
     pub fn line_count(&self) -> usize {
@@ -193,14 +228,19 @@ impl PagerState {
         let wrap_width = width.saturating_sub(1).max(1);
         let content_width = if self.line_numbers {
             // Probe to compute the gutter width at the new wrap width.
-            let probe = Document::new(&self.input, wrap_width);
+            let probe = Document::new_with_options(&self.input, wrap_width, self.render_options);
             wrap_width.saturating_sub(gutter_width(probe.line_count()) as u16)
         } else {
             wrap_width
         };
         if content_width != self.width {
             self.width = content_width as u16;
-            self.doc = render_doc(&self.input, wrap_width, self.line_numbers);
+            self.doc = render_doc(
+                &self.input,
+                wrap_width,
+                self.line_numbers,
+                self.render_options,
+            );
             // Re-run any active search against the re-wrapped lines.
             if let Some(s) = &self.search {
                 let query = s.query.clone();
@@ -510,11 +550,16 @@ fn gutter_width(n: usize) -> usize {
 /// numbers are enabled. Uses a two-pass approach: first render at full
 /// width to count lines, then re-render at the narrowed width so the
 /// gutter doesn't eat into the content.
-fn render_doc(input: &Input, wrap_width: u16, line_numbers: bool) -> Document {
+fn render_doc(
+    input: &Input,
+    wrap_width: u16,
+    line_numbers: bool,
+    render_options: RenderOptions,
+) -> Document {
     if !line_numbers {
-        return Document::new(input, wrap_width);
+        return Document::new_with_options(input, wrap_width, render_options);
     }
-    let probe = Document::new(input, wrap_width);
+    let probe = Document::new_with_options(input, wrap_width, render_options);
     let g = gutter_width(probe.line_count());
     if g == 0 {
         return probe;
@@ -523,14 +568,14 @@ fn render_doc(input: &Input, wrap_width: u16, line_numbers: bool) -> Document {
     if narrowed == wrap_width {
         return probe;
     }
-    let doc = Document::new(input, narrowed);
+    let doc = Document::new_with_options(input, narrowed, render_options);
     // Rare: line count crossed a digit boundary after narrowing.
     let g2 = gutter_width(doc.line_count());
     if g2 == g {
         return doc;
     }
     let narrowed2 = wrap_width.saturating_sub(g2 as u16).max(1);
-    Document::new(input, narrowed2)
+    Document::new_with_options(input, narrowed2, render_options)
 }
 
 fn clip_line(line: &Line<'static>, start: usize, width: usize) -> Line<'static> {

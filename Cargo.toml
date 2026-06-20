@@ -6,6 +6,7 @@ description = "A less-like terminal pager that renders markdown and mermaid"
 license = "MIT"
 
 [features]
+default = ["syntax", "mermaid"]
 mermaid = ["dep:figurehead"]
 syntax = ["dep:syntect"]
 

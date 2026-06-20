@@ -5,6 +5,9 @@
 //! ratatui. `ratatui::run` handles raw mode, the alternate screen, and a
 //! panic hook that restores the terminal before panicking.
 
+use std::sync::mpsc;
+use std::time::Duration;
+
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
     Frame,
@@ -18,7 +21,8 @@ use lessmd::cli;
 use lessmd::help;
 use lessmd::input;
 use lessmd::pager::{Mode, PagerState};
-use lessmd::source;
+use lessmd::render::RenderOptions;
+use lessmd::source::{self, ResolvedMode};
 
 fn main() -> std::io::Result<()> {
     let args = match cli::parse(std::env::args()) {
@@ -37,6 +41,10 @@ fn main() -> std::io::Result<()> {
         return Ok(());
     }
     let line_numbers = args.line_numbers;
+    let render_options = RenderOptions {
+        syntax: args.syntax,
+        mermaid: args.mermaid,
+    };
     let input = match source::read(args.path.as_deref(), args.mode) {
         Ok(i) => i,
         Err(e) => {
@@ -44,18 +52,46 @@ fn main() -> std::io::Result<()> {
             std::process::exit(1);
         }
     };
-    ratatui::run(|terminal| run_app(terminal, input, line_numbers))
+    ratatui::run(|terminal| run_app(terminal, input, line_numbers, render_options))
 }
 
 fn run_app(
     terminal: &mut ratatui::DefaultTerminal,
     input: source::Input,
     line_numbers: bool,
+    render_options: RenderOptions,
 ) -> std::io::Result<()> {
     let size = terminal.size()?;
-    let mut state = PagerState::new(input, size.height, size.width, line_numbers);
+    let initial_options = initial_render_options(&input, render_options);
+    let mut state = PagerState::new_with_options(
+        input.clone(),
+        size.height,
+        size.width,
+        line_numbers,
+        initial_options,
+    );
+    let (enhanced_tx, enhanced_rx) = mpsc::channel();
+    if initial_options != render_options {
+        let bg_input = input.clone();
+        std::thread::spawn(move || {
+            let enhanced = PagerState::new_with_options(
+                bg_input,
+                size.height,
+                size.width,
+                line_numbers,
+                render_options,
+            );
+            let _ = enhanced_tx.send((enhanced.doc, enhanced.width, render_options));
+        });
+    }
     let mut prev_offset = state.offset;
     loop {
+        if let Ok((doc, width, options)) = enhanced_rx.try_recv() {
+            state.width = width;
+            state.replace_doc(doc, options);
+            state.status = "enhanced render ready".to_owned();
+            terminal.clear()?;
+        }
         // Force a full redraw on multi-line jumps (Ctrl-D/U, PgUp/Dn, g, G)
         // to bypass ratatui's diff optimizer, which can leave stale content.
         if state.jumped(prev_offset) {
@@ -63,16 +99,29 @@ fn run_app(
         }
         prev_offset = state.offset;
         terminal.draw(|frame| draw(frame, &mut state))?;
-        match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                input::handle_key(&mut state, key);
-                if state.quit {
-                    return Ok(());
+        if event::poll(Duration::from_millis(25))? {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    input::handle_key(&mut state, key);
+                    if state.quit {
+                        return Ok(());
+                    }
                 }
+                Event::Resize(w, h) => state.resize(h, w),
+                _ => {}
             }
-            Event::Resize(w, h) => state.resize(h, w),
-            _ => {}
         }
+    }
+}
+
+fn initial_render_options(input: &source::Input, requested: RenderOptions) -> RenderOptions {
+    if input.render_mode == ResolvedMode::Markdown && (requested.syntax || requested.mermaid) {
+        RenderOptions {
+            syntax: false,
+            mermaid: false,
+        }
+    } else {
+        requested
     }
 }
 
@@ -283,4 +332,56 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     ])
     .areas(h);
     m
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(render_mode: ResolvedMode) -> source::Input {
+        source::Input {
+            text: String::new(),
+            render_mode,
+            source_path: None,
+        }
+    }
+
+    #[test]
+    fn markdown_initial_render_disables_enhancements() {
+        let requested = RenderOptions {
+            syntax: true,
+            mermaid: true,
+        };
+        assert_eq!(
+            initial_render_options(&input(ResolvedMode::Markdown), requested),
+            RenderOptions {
+                syntax: false,
+                mermaid: false,
+            }
+        );
+    }
+
+    #[test]
+    fn text_initial_render_keeps_requested_options() {
+        let requested = RenderOptions {
+            syntax: true,
+            mermaid: true,
+        };
+        assert_eq!(
+            initial_render_options(&input(ResolvedMode::Text { ansi: true }), requested),
+            requested
+        );
+    }
+
+    #[test]
+    fn markdown_without_enhancements_does_not_need_second_phase() {
+        let requested = RenderOptions {
+            syntax: false,
+            mermaid: false,
+        };
+        assert_eq!(
+            initial_render_options(&input(ResolvedMode::Markdown), requested),
+            requested
+        );
+    }
 }

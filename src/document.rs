@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use ratatui::text::Line;
 
 use crate::render;
+use crate::render::RenderOptions;
 use crate::source::Input;
 
 /// A heading captured during markdown rendering, used for the outline
@@ -29,7 +30,11 @@ pub struct Document {
 impl Document {
     /// Render the whole `input` up-front, wrapped to `width`.
     pub fn new(input: &Input, width: u16) -> Self {
-        let output = render::render(input, width);
+        Self::new_with_options(input, width, RenderOptions::default())
+    }
+
+    pub fn new_with_options(input: &Input, width: u16, options: RenderOptions) -> Self {
+        let output = render::render_with_options(input, width, options);
         Self {
             lines: output.lines,
             headings: output.headings,

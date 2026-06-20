@@ -7,8 +7,20 @@ pub struct Args {
     pub path: Option<PathBuf>,
     pub mode: RenderMode,
     pub line_numbers: bool,
+    pub syntax: bool,
+    pub mermaid: bool,
     pub show_help: bool,
     pub show_version: bool,
+}
+
+impl Args {
+    fn new() -> Self {
+        Self {
+            syntax: true,
+            mermaid: true,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -32,6 +44,8 @@ Usage:
 Options:
   --markdown        Force markdown rendering (ignore file extension).
   --plain           Force plain-text rendering and strip ANSI colors.
+  --no-syntax       Disable fenced code syntax highlighting.
+  --no-mermaid      Disable inline Mermaid rendering.
   -N, --line-numbers  Show line numbers in a left gutter.
   -h, --help        Show this help text and exit.
   -V, --version     Show version and exit.
@@ -65,7 +79,7 @@ Keybindings (inside the pager):
 /// the first element, as returned by `std::env::args`).
 pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
     let args = args.skip(1);
-    let mut out = Args::default();
+    let mut out = Args::new();
     let mut positional: Vec<String> = Vec::new();
     let mut only_positional = false;
 
@@ -77,6 +91,8 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
         match arg.as_str() {
             "--markdown" => out.mode = RenderMode::Markdown,
             "--plain" => out.mode = RenderMode::Plain,
+            "--no-syntax" => out.syntax = false,
+            "--no-mermaid" => out.mermaid = false,
             "-N" | "--line-numbers" => out.line_numbers = true,
             "-h" | "--help" => out.show_help = true,
             "-V" | "--version" => out.show_version = true,
@@ -143,6 +159,20 @@ mod tests {
         assert!(parse_args(&["-N", "x"]).line_numbers);
         assert!(parse_args(&["--line-numbers", "x"]).line_numbers);
         assert!(!parse_args(&["x"]).line_numbers);
+    }
+
+    #[test]
+    fn syntax_and_mermaid_default_on() {
+        let a = parse_args(&[]);
+        assert!(a.syntax);
+        assert!(a.mermaid);
+    }
+
+    #[test]
+    fn no_syntax_and_no_mermaid_flags() {
+        let a = parse_args(&["--no-syntax", "--no-mermaid", "x.md"]);
+        assert!(!a.syntax);
+        assert!(!a.mermaid);
     }
 
     #[test]

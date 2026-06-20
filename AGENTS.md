@@ -12,11 +12,11 @@ project is built and verified. Always run these before considering a task done.
 | `cargo fmt --check` | Verify formatting is clean |
 | `cargo fmt` | Apply formatting |
 | `cargo clippy --all-targets -- -D warnings` | Lint; warnings are errors |
+| `cargo clippy --all-targets --no-default-features -- -D warnings` | Lint the minimal build |
 | `cargo test` | Run the full test suite |
-| `cargo test --features mermaid` | Run tests including the mermaid feature (from M3) |
-| `cargo test --features syntax` | Run tests including syntax highlighting (from M5) |
-| `cargo test --features syntax,mermaid` | Run tests with both features |
+| `cargo test --no-default-features` | Run the minimal test suite without syntax/Mermaid deps |
 | `cargo run -- [path]` | Run the pager on a file or stdin (`-` = stdin) |
+| `cargo run -- --no-syntax --no-mermaid [path]` | Runtime-disable enhancements |
 
 ## Pre-completion checklist
 
@@ -25,13 +25,9 @@ Before marking any milestone task complete, all of these must pass:
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo clippy --all-targets --features syntax -- -D warnings
-cargo clippy --all-targets --features mermaid -- -D warnings
-cargo clippy --all-targets --features syntax,mermaid -- -D warnings
+cargo clippy --all-targets --no-default-features -- -D warnings
 cargo test
-cargo test --features mermaid
-cargo test --features syntax
-cargo test --features syntax,mermaid
+cargo test --no-default-features
 ```
 
 ## Conventions
