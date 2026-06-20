@@ -11,7 +11,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::document::Document;
 use crate::render::RenderOptions;
-use crate::search::{CaseMode, SearchState, search_lines};
+use crate::search::{CaseMode, SearchDirection, SearchState, search_lines};
 use crate::source::Input;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -19,7 +19,10 @@ pub enum Mode {
     #[default]
     Normal,
     /// Building a search query.
-    Search(String),
+    Search {
+        query: String,
+        direction: SearchDirection,
+    },
 }
 
 /// How search matches are highlighted on screen. Mirrors `less`'s `-g` and
@@ -147,6 +150,7 @@ impl PagerState {
             };
             self.search = Some(SearchState {
                 query,
+                direction: s.direction,
                 matches,
                 current,
             });
@@ -354,6 +358,7 @@ impl PagerState {
                 };
                 self.search = Some(SearchState {
                     query,
+                    direction: s.direction,
                     matches,
                     current,
                 });
@@ -366,7 +371,18 @@ impl PagerState {
     // -- search --------------------------------------------------------------
 
     pub fn start_search(&mut self) {
-        self.mode = Mode::Search(String::new());
+        self.start_search_with_direction(SearchDirection::Forward);
+    }
+
+    pub fn start_backward_search(&mut self) {
+        self.start_search_with_direction(SearchDirection::Backward);
+    }
+
+    pub fn start_search_with_direction(&mut self, direction: SearchDirection) {
+        self.mode = Mode::Search {
+            query: String::new(),
+            direction,
+        };
     }
 
     pub fn cancel_search(&mut self) {
@@ -375,70 +391,108 @@ impl PagerState {
     }
 
     pub fn search_backspace(&mut self) {
-        if let Mode::Search(ref mut q) = self.mode {
-            q.pop();
+        if let Mode::Search { ref mut query, .. } = self.mode {
+            query.pop();
         }
     }
 
     pub fn search_append(&mut self, c: char) {
-        if let Mode::Search(ref mut q) = self.mode {
-            q.push(c);
+        if let Mode::Search { ref mut query, .. } = self.mode {
+            query.push(c);
         }
     }
 
-    pub fn finalize_search(&mut self) {
-        let query = match &self.mode {
-            Mode::Search(q) => q.clone(),
-            Mode::Normal => return,
-        };
-        self.mode = Mode::Normal;
+    pub fn apply_search(&mut self, query: String, direction: SearchDirection) {
         let matches = search_lines(&self.doc.lines, &query, self.case_mode);
         if matches.is_empty() {
             self.search = None;
             self.pending_count = None;
             self.status = format!("no matches for {query:?}");
         } else {
-            // `N /pattern` jumps to the Nth match (1-based).
             let n = self.pending_count.take().unwrap_or(1).max(1);
-            let current = (n - 1).min(matches.len() - 1);
+            let current = self.match_index_for_direction(&matches, direction, n);
             self.jump_to_doc_line(matches[current]);
             self.status = format!("{}/{} matches", current + 1, matches.len());
             self.search = Some(SearchState {
                 query,
+                direction,
                 matches,
                 current,
             });
         }
     }
 
+    pub fn finalize_search(&mut self) {
+        let (query, direction) = match &self.mode {
+            Mode::Search { query, direction } => (query.clone(), *direction),
+            Mode::Normal => return,
+        };
+        self.mode = Mode::Normal;
+        self.apply_search(query, direction);
+    }
+
     pub fn next_match(&mut self) {
+        let direction = self
+            .search
+            .as_ref()
+            .map(|s| s.direction)
+            .unwrap_or(SearchDirection::Forward);
+        match direction {
+            SearchDirection::Forward => self.advance_match(1),
+            SearchDirection::Backward => self.advance_match(-1),
+        }
+    }
+
+    pub fn prev_match(&mut self) {
+        let direction = self
+            .search
+            .as_ref()
+            .map(|s| s.direction)
+            .unwrap_or(SearchDirection::Forward);
+        match direction {
+            SearchDirection::Forward => self.advance_match(-1),
+            SearchDirection::Backward => self.advance_match(1),
+        }
+    }
+
+    fn advance_match(&mut self, step: isize) {
         let Some(s) = &mut self.search else {
             return;
         };
         if s.matches.is_empty() {
             return;
         }
-        s.current = (s.current + 1) % s.matches.len();
+        let len = s.matches.len();
+        s.current = if step.is_negative() {
+            (s.current + len - (step.unsigned_abs() % len)) % len
+        } else {
+            (s.current + step as usize) % len
+        };
         let line = s.matches[s.current];
         let cur = s.current;
-        let total = s.matches.len();
+        let total = len;
         self.jump_to_doc_line(line);
         self.status = format!("{}/{} matches", cur + 1, total);
     }
 
-    pub fn prev_match(&mut self) {
-        let Some(s) = &mut self.search else {
-            return;
-        };
-        if s.matches.is_empty() {
-            return;
+    fn match_index_for_direction(
+        &self,
+        matches: &[usize],
+        direction: SearchDirection,
+        n: usize,
+    ) -> usize {
+        let len = matches.len();
+        match direction {
+            SearchDirection::Forward => {
+                let start = matches.partition_point(|&line| line < self.offset);
+                (start + n - 1) % len
+            }
+            SearchDirection::Backward => {
+                let before = matches.partition_point(|&line| line < self.offset);
+                let start = before.checked_sub(1).unwrap_or(len - 1);
+                (start + len - ((n - 1) % len)) % len
+            }
         }
-        s.current = (s.current + s.matches.len() - 1) % s.matches.len();
-        let line = s.matches[s.current];
-        let cur = s.current;
-        let total = s.matches.len();
-        self.jump_to_doc_line(line);
-        self.status = format!("{}/{} matches", cur + 1, total);
     }
 
     // -- misc ----------------------------------------------------------------
@@ -1056,6 +1110,23 @@ mod tests {
     }
 
     #[test]
+    fn backward_search_repeats_in_reverse_direction() {
+        let mut s = make_state("match\nother\nmatch\nother\nmatch", 2, 80);
+        s.goto_bottom();
+        s.start_backward_search();
+        for c in "match".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+
+        assert_eq!(s.offset, 2);
+        s.next_match();
+        assert_eq!(s.offset, 0);
+        s.prev_match();
+        assert_eq!(s.offset, 2);
+    }
+
+    #[test]
     fn search_no_matches_sets_status() {
         let mut s = make_state("hello\nworld", 10, 80);
         s.start_search();
@@ -1110,7 +1181,7 @@ mod tests {
         s.search_append('y');
         s.search_backspace();
         match s.mode {
-            Mode::Search(ref q) => assert_eq!(q, "x"),
+            Mode::Search { ref query, .. } => assert_eq!(query, "x"),
             _ => panic!("expected search mode"),
         }
     }

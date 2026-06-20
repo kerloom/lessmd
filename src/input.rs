@@ -4,10 +4,12 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::pager::{Mode, PagerState};
+#[cfg(test)]
+use crate::search::SearchDirection;
 
 /// Handle a single key press in the context of `state`.
 pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
-    if let Mode::Search(_) = state.mode {
+    if let Mode::Search { .. } = state.mode {
         handle_search_key(state, key);
         return;
     }
@@ -99,6 +101,7 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Tab => state.toggle_fold(),
         // search
         KeyCode::Char('/') => state.start_search(),
+        KeyCode::Char('?') => state.start_backward_search(),
         KeyCode::Char('n') => state.next_match(),
         KeyCode::Char('N') => state.prev_match(),
         // highlight toggles (Esc-u / Esc-U)
@@ -106,22 +109,22 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Char('U') if key.modifiers.contains(KeyModifiers::ALT) => state.clear_search(),
         // repaint (r)
         KeyCode::Char('r') => state.repaint(),
-        // help
-        KeyCode::Char('?') => state.toggle_help(),
+        // help (less-compatible `H`; `?` is backward search)
+        KeyCode::Char('H') => state.toggle_help(),
         _ => {}
     }
     // Discard the count if the dispatched command didn't consume it and
     // we didn't just enter search mode (which needs the count for
     // `Nth match` semantics). Matches `less`'s "any non-digit key
     // consumes the count" behavior.
-    if state.pending_count == count_before && !matches!(state.mode, Mode::Search(_)) {
+    if state.pending_count == count_before && !matches!(state.mode, Mode::Search { .. }) {
         state.clear_count();
     }
 }
 
 fn handle_help_key(state: &mut PagerState, key: KeyEvent) {
     match key.code {
-        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc | KeyCode::Char('?') => {
+        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc | KeyCode::Char('H') => {
             state.toggle_help()
         }
         _ => {}
@@ -205,15 +208,34 @@ mod tests {
     fn slash_enters_search_mode() {
         let mut s = state("abc");
         handle_key(&mut s, key('/'));
-        assert_eq!(s.mode, Mode::Search(String::new()));
+        assert_eq!(
+            s.mode,
+            Mode::Search {
+                query: String::new(),
+                direction: SearchDirection::Forward,
+            }
+        );
     }
 
     #[test]
-    fn question_mark_toggles_help() {
+    fn question_mark_enters_backward_search_mode() {
         let mut s = state("abc");
         handle_key(&mut s, key('?'));
+        assert_eq!(
+            s.mode,
+            Mode::Search {
+                query: String::new(),
+                direction: SearchDirection::Backward,
+            }
+        );
+    }
+
+    #[test]
+    fn uppercase_h_toggles_help() {
+        let mut s = state("abc");
+        handle_key(&mut s, key('H'));
         assert!(s.show_help);
-        handle_key(&mut s, key('?'));
+        handle_key(&mut s, key('H'));
         assert!(!s.show_help);
     }
 
@@ -536,11 +558,11 @@ mod tests {
 
     #[test]
     fn non_counted_command_clears_pending_count() {
-        // `5?` should drop the `5` since help doesn't use it.
+        // `5H` should drop the `5` since help doesn't use it.
         let mut s = state(&"a\n".repeat(50));
         handle_key(&mut s, key('5'));
-        handle_key(&mut s, key('?'));
-        assert!(s.show_help, "? should open help");
+        handle_key(&mut s, key('H'));
+        assert!(s.show_help, "H should open help");
         assert_eq!(s.pending_count, None, "count should be discarded");
         // Close help, then verify a follow-up `j` defaults to 1.
         handle_key(&mut s, key('q'));

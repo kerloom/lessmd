@@ -23,6 +23,7 @@ use lessmd::help;
 use lessmd::input;
 use lessmd::pager::{Mode, PagerState};
 use lessmd::render::RenderOptions;
+use lessmd::search::SearchDirection;
 use lessmd::source::{self, ResolvedMode};
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -52,7 +53,7 @@ struct BackgroundRenderJob {
     generation: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct AppOptions {
     line_numbers: bool,
     render_options: RenderOptions,
@@ -60,6 +61,7 @@ struct AppOptions {
     quit_on_intr: bool,
     case_mode: lessmd::search::CaseMode,
     highlight: lessmd::pager::HighlightMode,
+    initial_command: Option<cli::InitialCommand>,
 }
 
 fn main() -> std::io::Result<()> {
@@ -88,6 +90,7 @@ fn main() -> std::io::Result<()> {
         quit_on_intr: args.quit_on_intr,
         case_mode: args.case_mode,
         highlight: args.highlight,
+        initial_command: args.initial_command,
     };
     let input = match source::read(args.path.as_deref(), args.mode) {
         Ok(i) => i,
@@ -106,7 +109,8 @@ fn run_app(
 ) -> std::io::Result<()> {
     let size = terminal.size()?;
     let prefix_source_lines = prefix_source_lines_for_height(size.height);
-    let use_prefix = should_use_prefix_input(&input, prefix_source_lines);
+    let use_prefix =
+        options.initial_command.is_none() && should_use_prefix_input(&input, prefix_source_lines);
     let first_input = if use_prefix {
         prefix_input_for_viewport(&input, prefix_source_lines)
     } else {
@@ -125,6 +129,9 @@ fn run_app(
     state.input = input.clone();
     state.set_case_mode(options.case_mode);
     state.set_highlight(options.highlight);
+    if let Some(command) = &options.initial_command {
+        apply_initial_command(&mut state, command);
+    }
     let (enhanced_tx, enhanced_rx) = mpsc::channel::<EnhancedMsg>();
     let mut render_generation = 0;
     if use_prefix || initial_options != options.render_options {
@@ -244,6 +251,16 @@ fn run_app(
 
 fn is_interrupt_key(key: KeyEvent) -> bool {
     key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+fn apply_initial_command(state: &mut PagerState, command: &cli::InitialCommand) {
+    match command {
+        cli::InitialCommand::Bottom => state.goto_bottom(),
+        cli::InitialCommand::Line(line) => state.goto_line(*line),
+        cli::InitialCommand::Search { query, direction } => {
+            state.apply_search(query.clone(), *direction);
+        }
+    }
 }
 
 fn resize_poll_timeout(elapsed: Duration) -> Duration {
@@ -411,7 +428,13 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
 
 fn status_line(state: &PagerState) -> Text<'static> {
     match &state.mode {
-        Mode::Search(q) => Text::from(format!("/{}", sanitize_terminal_text(q))),
+        Mode::Search { query, direction } => {
+            let prompt = match direction {
+                SearchDirection::Forward => '/',
+                SearchDirection::Backward => '?',
+            };
+            Text::from(format!("{prompt}{}", sanitize_terminal_text(query)))
+        }
         Mode::Normal => {
             // Digit-prefix count being built: show ":<n>" until consumed.
             if let Some(n) = state.pending_count {

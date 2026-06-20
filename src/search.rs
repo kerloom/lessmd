@@ -16,9 +16,17 @@ pub enum CaseMode {
     Insensitive,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SearchDirection {
+    #[default]
+    Forward,
+    Backward,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchState {
     pub query: String,
+    pub direction: SearchDirection,
     /// Indices into the document's `lines` vector.
     pub matches: Vec<usize>,
     /// Cursor into `matches` (0-based).
@@ -304,6 +312,7 @@ mod tests {
     fn search_state_checks_matches_by_binary_search() {
         let state = SearchState {
             query: "x".to_owned(),
+            direction: SearchDirection::Forward,
             matches: vec![1, 3, 8],
             current: 0,
         };

@@ -29,9 +29,10 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 | `Np` / `N%` | `Np` / `N%` | jump to N percent |
 | `ESC-) →` | `l` `→` (8 cols) | pan right |
 | `ESC-( ←` | `h` `←` (8 cols) | pan left |
-| `h H` | `?` | help (moved) |
+| `H` | `H` | help (`h` pans left) |
 | `q :q Q :Q ZZ` | `q` `Q` `Esc` | quit |
 | `/pattern` | `/` | forward search |
+| `?pattern` | `?` | backward search |
 | `n` | `n` | repeat search |
 | `N` | `N` | reverse repeat |
 | `r ^R ^L` | `r` `Ctrl-L` | repaint (no-op, ratatui redraws) |
@@ -41,7 +42,6 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 
 ### 🟡 Partial
 
-- `n` / `N` — direction-agnostic; not yet direction-aware (would change once `?` lands).
 - Search modifiers (`^N`, `^E`, `^F`, `^K`, `^R`, `^S n`, `^W`, `^L`) — none implemented.
 
 ### ❌ Missing
@@ -56,7 +56,6 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 
 **Searching**
 
-- `?pattern` (backward search) — **medium-low LoE**
 - `ESC-u` toggle highlight ✅ (just added)
 - `ESC-U` clear saved pattern + highlight ✅ (just added)
 - `& pattern` (line filter) — **HIGH LoE**
@@ -82,7 +81,7 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 - `|X cmd` (pipe to shell)
 - `s file` (save input)
 - `v` (edit current file via `$VISUAL` / `$EDITOR`)
-- `+cmd` (initial command, e.g. `+G`, `+/pattern`) — **medium LoE**
+- `+cmd` forms beyond `+G`, `+N`, `+/pattern`, `+?pattern`
 
 ## Command-line options
 
@@ -176,15 +175,15 @@ The biggest **methodology** gap is end-to-end TUI testing:
 - [x] `-g` / `-G` + `ESC-u` toggle / `ESC-U` clear
 - [x] `r` / `Ctrl-L` / `Ctrl-R` repaint
 - [x] Numbered command args for movement/search (`5j`, `10G`, `50%`, `2/pat`)
-- [ ] `+cmd` initial commands (`+G`, `+/pat`, `+/pat-N`)
+- [x] `+cmd` initial commands (`+G`, `+N`, `+/pat`, `+?pat`)
 - [ ] `-e` / `-E` (auto-exit on EOF)
 - [x] `-K` (Ctrl-C exits even from prompts)
 - [ ] `-q` / `-Q` (silence bell)
 
 **Medium-low (deferred per "even skip medium-low"):**
 
-- [ ] `?` backward search
-- [ ] `+cmd` / `-p pattern` (initial command)
+- [x] `?` backward search with direction-aware `n`/`N`
+- [ ] `-p pattern` / `--pattern` (initial command)
 - [ ] `-S` (chop long lines)
 - [ ] `-a` / `-A` (search-skip-screen)
 - [ ] `-j N` (jump target)

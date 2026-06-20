@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 pub use crate::pager::HighlightMode;
 pub use crate::search::CaseMode;
+use crate::search::SearchDirection;
 
 #[derive(Debug, Clone, Default)]
 pub struct Args {
@@ -23,6 +24,8 @@ pub struct Args {
     pub case_mode: CaseMode,
     /// `-g` / `-G`: search-match highlight mode. Mirrors `less`.
     pub highlight: HighlightMode,
+    /// Initial `+cmd` to execute after loading the file.
+    pub initial_command: Option<InitialCommand>,
 }
 
 impl Args {
@@ -46,11 +49,22 @@ pub enum RenderMode {
     Plain,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InitialCommand {
+    Bottom,
+    Line(usize),
+    Search {
+        query: String,
+        direction: SearchDirection,
+    },
+}
+
 pub const HELP_TEXT: &str = "\
 lessmd — a less-like terminal pager that renders markdown and mermaid.
 
 Usage:
   lessmd [OPTIONS] [FILE]
+  lessmd [OPTIONS] +CMD [FILE]
   lessmd [OPTIONS] -         (read from stdin)
 
 Options:
@@ -69,6 +83,7 @@ Options:
   -V, --version     Show version and exit.
 
 When FILE is omitted or '-', lessmd reads from stdin.
+Initial commands include +G, +10, +/pattern, and +?pattern.
 
 Keybindings (inside the pager):
   Most commands accept a digit prefix, e.g. `5j` scrolls 5 lines,
@@ -90,13 +105,14 @@ Keybindings (inside the pager):
   o                        toggle outline (jump to heading)
   Tab                      toggle fold on heading
   /                        start search (N before / = Nth match)
+  ?                        start backward search
   n                        next search match
   N                        previous search match
   r / Ctrl-L               repaint (no-op; ratatui redraws every frame)
   Esc-u                    toggle search-match highlighting
   Esc-U                    clear saved search pattern + highlighting
   Ctrl-C                   abort search
-  ?                        toggle help
+  H                        toggle help
   q / Q / Esc              quit
 ";
 
@@ -129,6 +145,9 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
             "-V" | "--version" => out.show_version = true,
             "--" => only_positional = true,
             "-" => positional.push("-".to_owned()),
+            s if s.starts_with('+') && s.len() > 1 => {
+                out.initial_command = Some(parse_initial_command(s)?);
+            }
             s if s.starts_with("--") => return Err(format!("unknown option: {s}")),
             s if s.starts_with('-') && s.len() > 1 => return Err(format!("unknown option: {s}")),
             s => positional.push(s.to_owned()),
@@ -147,6 +166,29 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
         n => return Err(format!("expected at most one file, got {n}")),
     }
     Ok(out)
+}
+
+fn parse_initial_command(s: &str) -> Result<InitialCommand, String> {
+    let cmd = &s[1..];
+    if cmd == "G" {
+        return Ok(InitialCommand::Bottom);
+    }
+    if let Some(query) = cmd.strip_prefix('/') {
+        return Ok(InitialCommand::Search {
+            query: query.to_owned(),
+            direction: SearchDirection::Forward,
+        });
+    }
+    if let Some(query) = cmd.strip_prefix('?') {
+        return Ok(InitialCommand::Search {
+            query: query.to_owned(),
+            direction: SearchDirection::Backward,
+        });
+    }
+    if let Ok(line) = cmd.parse::<usize>() {
+        return Ok(InitialCommand::Line(line));
+    }
+    Err(format!("unknown initial command: {s}"))
 }
 
 #[cfg(test)]
@@ -226,6 +268,32 @@ mod tests {
         assert!(parse_args(&["-K", "x"]).quit_on_intr);
         assert!(parse_args(&["--quit-on-intr", "x"]).quit_on_intr);
         assert!(!parse_args(&["x"]).quit_on_intr);
+    }
+
+    #[test]
+    fn initial_command_flags() {
+        assert_eq!(
+            parse_args(&["+G", "x"]).initial_command,
+            Some(InitialCommand::Bottom)
+        );
+        assert_eq!(
+            parse_args(&["+10", "x"]).initial_command,
+            Some(InitialCommand::Line(10))
+        );
+        assert_eq!(
+            parse_args(&["+/foo", "x"]).initial_command,
+            Some(InitialCommand::Search {
+                query: "foo".to_owned(),
+                direction: SearchDirection::Forward,
+            })
+        );
+        assert_eq!(
+            parse_args(&["+?foo", "x"]).initial_command,
+            Some(InitialCommand::Search {
+                query: "foo".to_owned(),
+                direction: SearchDirection::Backward,
+            })
+        );
     }
 
     #[test]
