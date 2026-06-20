@@ -212,7 +212,7 @@ fn markdown_mermaid_fixture_falls_back_without_feature() {
     assert!(text.contains("Mermaid Fixture"));
     assert!(text.contains("┌─ mermaid"));
     assert!(text.contains("graph LR"));
-    assert!(text.contains("mermaid render failed:"));
+    assert!(!text.contains("mermaid render failed:"));
 }
 
 #[cfg(feature = "mermaid")]

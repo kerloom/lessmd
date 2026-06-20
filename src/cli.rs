@@ -26,8 +26,8 @@ pub struct Args {
 impl Args {
     fn new() -> Self {
         Self {
-            syntax: true,
-            mermaid: true,
+            syntax: cfg!(feature = "syntax"),
+            mermaid: cfg!(feature = "mermaid"),
             ..Self::default()
         }
     }
@@ -189,10 +189,10 @@ mod tests {
     }
 
     #[test]
-    fn syntax_and_mermaid_default_on() {
+    fn syntax_and_mermaid_defaults_match_compiled_features() {
         let a = parse_args(&[]);
-        assert!(a.syntax);
-        assert!(a.mermaid);
+        assert_eq!(a.syntax, cfg!(feature = "syntax"));
+        assert_eq!(a.mermaid, cfg!(feature = "mermaid"));
     }
 
     #[test]

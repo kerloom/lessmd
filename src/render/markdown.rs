@@ -37,7 +37,15 @@ pub fn render_markdown_with_mermaid(
     width: u16,
     mermaid: &dyn MermaidRenderer,
 ) -> RenderOutput {
-    render_markdown_with_mermaid_and_options(text, width, mermaid, RenderOptions::default())
+    render_markdown_with_mermaid_and_options(
+        text,
+        width,
+        mermaid,
+        RenderOptions {
+            mermaid: true,
+            ..RenderOptions::default()
+        },
+    )
 }
 
 pub fn render_markdown_with_mermaid_and_options(

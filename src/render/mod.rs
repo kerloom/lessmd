@@ -21,8 +21,8 @@ pub struct RenderOptions {
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
-            syntax: true,
-            mermaid: true,
+            syntax: cfg!(feature = "syntax"),
+            mermaid: cfg!(feature = "mermaid"),
         }
     }
 }
@@ -45,5 +45,17 @@ pub fn render_with_options(input: &Input, width: u16, options: RenderOptions) ->
         ResolvedMode::Markdown => {
             markdown::render_markdown_with_options(&input.text, width, options)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_options_defaults_match_compiled_features() {
+        let options = RenderOptions::default();
+        assert_eq!(options.syntax, cfg!(feature = "syntax"));
+        assert_eq!(options.mermaid, cfg!(feature = "mermaid"));
     }
 }
