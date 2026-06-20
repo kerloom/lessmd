@@ -5,6 +5,17 @@ use ratatui::{
     text::{Line, Span},
 };
 
+/// Case-sensitivity mode for `/` and `?` searches. Matches `less`'s `-i` and
+/// `-I` flags: `Sensitive` is the default; `Smart` ignores case unless the
+/// pattern itself contains uppercase; `Insensitive` always ignores case.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CaseMode {
+    #[default]
+    Sensitive,
+    Smart,
+    Insensitive,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchState {
     pub query: String,
@@ -14,15 +25,31 @@ pub struct SearchState {
     pub current: usize,
 }
 
-/// Return the indices of all lines containing `query` (case-sensitive).
-pub fn search_lines(lines: &[Line], query: &str) -> Vec<usize> {
+/// Return true if `line` contains `query` according to `case_mode`.
+fn line_contains(line: &Line, query: &str, case_mode: CaseMode) -> bool {
+    let haystack = line_to_plain(line);
+    match case_mode {
+        CaseMode::Sensitive => haystack.contains(query),
+        CaseMode::Insensitive => haystack.to_lowercase().contains(&query.to_lowercase()),
+        CaseMode::Smart => {
+            if query.chars().any(|c| c.is_uppercase()) {
+                haystack.contains(query)
+            } else {
+                haystack.to_lowercase().contains(&query.to_lowercase())
+            }
+        }
+    }
+}
+
+/// Return the indices of all lines containing `query`.
+pub fn search_lines(lines: &[Line], query: &str, case_mode: CaseMode) -> Vec<usize> {
     if query.is_empty() {
         return Vec::new();
     }
     lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| line_to_plain(line).contains(query))
+        .filter(|(_, line)| line_contains(line, query, case_mode))
         .map(|(i, _)| i)
         .collect()
 }
@@ -158,27 +185,53 @@ mod tests {
     fn finds_matching_lines() {
         let lines = vec![Line::raw("alpha"), Line::raw("beta"), Line::raw("gamma")];
         // "a" appears in all three (alpha, bet**a**, gamm**a**)
-        assert_eq!(search_lines(&lines, "a"), vec![0, 1, 2]);
-        assert_eq!(search_lines(&lines, "beta"), vec![1]);
-        assert_eq!(search_lines(&lines, "lph"), vec![0]);
+        assert_eq!(
+            search_lines(&lines, "a", CaseMode::Sensitive),
+            vec![0, 1, 2]
+        );
+        assert_eq!(search_lines(&lines, "beta", CaseMode::Sensitive), vec![1]);
+        assert_eq!(search_lines(&lines, "lph", CaseMode::Sensitive), vec![0]);
     }
 
     #[test]
     fn empty_query_matches_nothing() {
         let lines = vec![Line::raw("alpha")];
-        assert!(search_lines(&lines, "").is_empty());
+        assert!(search_lines(&lines, "", CaseMode::Sensitive).is_empty());
     }
 
     #[test]
     fn no_matches_returns_empty() {
         let lines = vec![Line::raw("alpha")];
-        assert!(search_lines(&lines, "zzz").is_empty());
+        assert!(search_lines(&lines, "zzz", CaseMode::Sensitive).is_empty());
     }
 
     #[test]
     fn case_sensitive() {
         let lines = vec![Line::raw("Foo"), Line::raw("foo")];
-        assert_eq!(search_lines(&lines, "Foo"), vec![0]);
+        assert_eq!(search_lines(&lines, "Foo", CaseMode::Sensitive), vec![0]);
+        assert_eq!(search_lines(&lines, "foo", CaseMode::Sensitive), vec![1]);
+    }
+
+    #[test]
+    fn case_insensitive_ignores_case() {
+        let lines = vec![Line::raw("Foo"), Line::raw("FOO"), Line::raw("bar")];
+        assert_eq!(
+            search_lines(&lines, "foo", CaseMode::Insensitive),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn smart_ignores_case_for_lowercase_pattern() {
+        let lines = vec![Line::raw("Foo"), Line::raw("FOO"), Line::raw("bar")];
+        assert_eq!(search_lines(&lines, "foo", CaseMode::Smart), vec![0, 1]);
+    }
+
+    #[test]
+    fn smart_falls_back_to_sensitive_for_uppercase_pattern() {
+        let lines = vec![Line::raw("Foo"), Line::raw("foo")];
+        // Pattern has uppercase 'F' — case-sensitive match.
+        assert_eq!(search_lines(&lines, "Foo", CaseMode::Smart), vec![0]);
     }
 
     // -- highlight_line tests ------------------------------------------------

@@ -422,7 +422,11 @@ fn perf_search_large_doc() {
     let state = PagerState::new(input, 24, 80, false);
 
     let t0 = Instant::now();
-    let matches = lessmd::search::search_lines(&state.doc.lines, "NEEDLE");
+    let matches = lessmd::search::search_lines(
+        &state.doc.lines,
+        "NEEDLE",
+        lessmd::search::CaseMode::Sensitive,
+    );
     let elapsed = t0.elapsed();
 
     println!(

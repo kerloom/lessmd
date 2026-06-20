@@ -11,7 +11,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::document::Document;
 use crate::render::RenderOptions;
-use crate::search::{SearchState, search_lines};
+use crate::search::{CaseMode, SearchState, search_lines};
 use crate::source::Input;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -20,6 +20,19 @@ pub enum Mode {
     Normal,
     /// Building a search query.
     Search(String),
+}
+
+/// How search matches are highlighted on screen. Mirrors `less`'s `-g` and
+/// `-G` flags; `ESC-u` toggles between `All` and `None`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HighlightMode {
+    /// Highlight every match (default).
+    #[default]
+    All,
+    /// Highlight only the current match (`-g`).
+    Last,
+    /// Suppress all match highlighting (`-G`).
+    None,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +55,11 @@ pub struct PagerState {
     pub show_outline: bool,
     pub outline_selection: usize,
     pub line_numbers: bool,
+    /// Case-sensitivity mode for `/` searches. Mirrors `less`'s `-i`/`-I`.
+    pub case_mode: CaseMode,
+    /// Search-match highlight mode. Mirrors `less`'s `-g`/`-G` and the
+    /// `ESC-u` / `ESC-U` runtime toggles.
+    pub highlight: HighlightMode,
     /// Heading indices (into `doc.headings`) whose body is folded.
     pub folded: HashSet<usize>,
     /// Maps each visible row → index into `doc.lines`. Rebuilt when folds
@@ -95,6 +113,8 @@ impl PagerState {
             show_outline: false,
             outline_selection: 0,
             line_numbers,
+            case_mode: CaseMode::default(),
+            highlight: HighlightMode::default(),
             folded: HashSet::new(),
             visible_indices: Vec::new(),
             viewport_overlay: None,
@@ -110,7 +130,7 @@ impl PagerState {
         self.viewport_overlay = None;
         if let Some(s) = &self.search {
             let query = s.query.clone();
-            let matches = search_lines(&self.doc.lines, &query);
+            let matches = search_lines(&self.doc.lines, &query, self.case_mode);
             let current = if matches.is_empty() {
                 0
             } else {
@@ -264,7 +284,7 @@ impl PagerState {
             // Re-run any active search against the re-wrapped lines.
             if let Some(s) = &self.search {
                 let query = s.query.clone();
-                let matches = search_lines(&self.doc.lines, &query);
+                let matches = search_lines(&self.doc.lines, &query, self.case_mode);
                 let current = if matches.is_empty() {
                     0
                 } else {
@@ -310,7 +330,7 @@ impl PagerState {
             Mode::Normal => return,
         };
         self.mode = Mode::Normal;
-        let matches = search_lines(&self.doc.lines, &query);
+        let matches = search_lines(&self.doc.lines, &query, self.case_mode);
         if matches.is_empty() {
             self.search = None;
             self.status = format!("no matches for {query:?}");
@@ -364,6 +384,36 @@ impl PagerState {
 
     pub fn quit(&mut self) {
         self.quit = true;
+    }
+
+    /// `r` / `^L` / `^R` repaint. Ratatui redraws the entire frame every tick
+    /// already, so this is a deliberate no-op kept for `less` muscle memory.
+    pub fn repaint(&mut self) {}
+
+    /// Set the case-sensitivity mode for searches.
+    pub fn set_case_mode(&mut self, mode: CaseMode) {
+        self.case_mode = mode;
+    }
+
+    /// Set the search-match highlight mode (`-g`/`-G`).
+    pub fn set_highlight(&mut self, mode: HighlightMode) {
+        self.highlight = mode;
+    }
+
+    /// `ESC-u`: toggle search highlight on/off. If the current mode is
+    /// `None`, restore `All`; otherwise go to `None` (matching `less`).
+    pub fn toggle_highlight(&mut self) {
+        self.highlight = match self.highlight {
+            HighlightMode::None => HighlightMode::All,
+            _ => HighlightMode::None,
+        };
+    }
+
+    /// `ESC-U`: clear the saved search pattern and turn highlighting off.
+    pub fn clear_search(&mut self) {
+        self.search = None;
+        self.highlight = HighlightMode::None;
+        self.status.clear();
     }
 
     // -- folding -------------------------------------------------------------
@@ -1207,5 +1257,88 @@ mod tests {
         s.toggle_fold();
         assert!(!s.folded.contains(&0));
         assert!(s.folded.contains(&1));
+    }
+
+    // -- repaint / case mode / highlight mode --------------------------------
+
+    #[test]
+    fn repaint_is_a_noop() {
+        let mut s = make_state("hello\nworld", 24, 80);
+        // Just verify it doesn't panic or change state.
+        s.repaint();
+        assert_eq!(s.offset, 0);
+        assert!(!s.quit);
+    }
+
+    #[test]
+    fn set_case_mode_does_not_already_research() {
+        // Changing case mode by itself shouldn't re-run an existing search.
+        let mut s = make_state("Foo\nfoo", 24, 80);
+        s.start_search();
+        for c in "Foo".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+        assert_eq!(s.search.as_ref().unwrap().matches.len(), 1);
+
+        s.set_case_mode(CaseMode::Insensitive);
+        // Same in-memory matches — set_case_mode is for the next search.
+        assert_eq!(s.search.as_ref().unwrap().matches.len(), 1);
+
+        // A new search DOES respect the new mode.
+        s.cancel_search();
+        s.start_search();
+        for c in "foo".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+        assert_eq!(s.search.as_ref().unwrap().matches.len(), 2);
+    }
+
+    #[test]
+    fn case_mode_smart_falls_back_to_sensitive_for_uppercase_query() {
+        let mut s = make_state("Foo\nfoo", 24, 80);
+        s.set_case_mode(CaseMode::Smart);
+        s.start_search();
+        for c in "Foo".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+        // Smart mode: uppercase in pattern => sensitive => only "Foo" matches.
+        assert_eq!(s.search.as_ref().unwrap().matches.len(), 1);
+    }
+
+    #[test]
+    fn toggle_highlight_flips_between_all_and_none() {
+        let mut s = make_state("hello", 24, 80);
+        assert_eq!(s.highlight, HighlightMode::All);
+        s.toggle_highlight();
+        assert_eq!(s.highlight, HighlightMode::None);
+        s.toggle_highlight();
+        assert_eq!(s.highlight, HighlightMode::All);
+    }
+
+    #[test]
+    fn toggle_highlight_from_last_goes_to_none() {
+        let mut s = make_state("hello", 24, 80);
+        s.set_highlight(HighlightMode::Last);
+        s.toggle_highlight();
+        assert_eq!(s.highlight, HighlightMode::None);
+    }
+
+    #[test]
+    fn clear_search_empties_search_and_disables_highlight() {
+        let mut s = make_state("hello\nworld", 24, 80);
+        s.start_search();
+        for c in "hello".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+        assert!(s.search.is_some());
+
+        s.set_highlight(HighlightMode::Last);
+        s.clear_search();
+        assert!(s.search.is_none());
+        assert_eq!(s.highlight, HighlightMode::None);
     }
 }

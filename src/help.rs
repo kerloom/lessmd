@@ -12,7 +12,7 @@ pub fn help_text() -> Text<'static> {
     ));
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
-    let entries: [(&str, &str); 20] = [
+    let entries: [(&str, &str); 23] = [
         ("j / e / v", "scroll down one line"),
         ("k / y / ^", "scroll up one line"),
         ("h / <-", "pan left"),
@@ -30,6 +30,9 @@ pub fn help_text() -> Text<'static> {
         ("/", "start search"),
         ("n", "next match"),
         ("N", "previous match"),
+        ("r / Ctrl-L", "repaint (no-op)"),
+        ("Esc-u", "toggle search-match highlighting"),
+        ("Esc-U", "clear saved search + highlighting"),
         ("Ctrl-C", "abort search"),
         ("?", "toggle this help"),
         ("q / Q / Esc", "quit"),

@@ -2,6 +2,9 @@
 
 use std::path::PathBuf;
 
+pub use crate::pager::HighlightMode;
+pub use crate::search::CaseMode;
+
 #[derive(Debug, Clone, Default)]
 pub struct Args {
     pub path: Option<PathBuf>,
@@ -11,6 +14,13 @@ pub struct Args {
     pub mermaid: bool,
     pub show_help: bool,
     pub show_version: bool,
+    /// `-F` / `--quit-if-one-screen`: exit immediately if the entire file
+    /// fits on the first screen.
+    pub quit_if_one_screen: bool,
+    /// `-i` / `-I`: case-sensitivity mode for `/` searches. Mirrors `less`.
+    pub case_mode: CaseMode,
+    /// `-g` / `-G`: search-match highlight mode. Mirrors `less`.
+    pub highlight: HighlightMode,
 }
 
 impl Args {
@@ -47,6 +57,11 @@ Options:
   --no-syntax       Disable fenced code syntax highlighting.
   --no-mermaid      Disable inline Mermaid rendering.
   -N, --line-numbers  Show line numbers in a left gutter.
+  -F, --quit-if-one-screen  Exit if the whole file fits on the first screen.
+  -i, --ignore-case  Ignore case in searches (unless pattern has uppercase).
+  -I, --IGNORE-CASE  Ignore case in all searches.
+  -g, --hilite-search  Highlight only the current search match.
+  -G, --HILITE-SEARCH  Suppress all search-match highlighting.
   -h, --help        Show this help text and exit.
   -V, --version     Show version and exit.
 
@@ -70,6 +85,9 @@ Keybindings (inside the pager):
   /                        start search
   n                        next search match
   N                        previous search match
+  r / Ctrl-L               repaint (no-op; ratatui redraws every frame)
+  Esc-u                    toggle search-match highlighting
+  Esc-U                    clear saved search pattern + highlighting
   Ctrl-C                   abort search
   ?                        toggle help
   q / Q / Esc              quit
@@ -94,6 +112,11 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
             "--no-syntax" => out.syntax = false,
             "--no-mermaid" => out.mermaid = false,
             "-N" | "--line-numbers" => out.line_numbers = true,
+            "-F" | "--quit-if-one-screen" => out.quit_if_one_screen = true,
+            "-i" | "--ignore-case" => out.case_mode = CaseMode::Smart,
+            "-I" | "--IGNORE-CASE" => out.case_mode = CaseMode::Insensitive,
+            "-g" | "--hilite-search" => out.highlight = HighlightMode::Last,
+            "-G" | "--HILITE-SEARCH" => out.highlight = HighlightMode::None,
             "-h" | "--help" => out.show_help = true,
             "-V" | "--version" => out.show_version = true,
             "--" => only_positional = true,
@@ -181,6 +204,33 @@ mod tests {
         assert!(parse_args(&["-h"]).show_help);
         assert!(parse_args(&["--version"]).show_version);
         assert!(parse_args(&["-V"]).show_version);
+    }
+
+    #[test]
+    fn quit_if_one_screen_flag() {
+        assert!(parse_args(&["-F", "x"]).quit_if_one_screen);
+        assert!(parse_args(&["--quit-if-one-screen", "x"]).quit_if_one_screen);
+        assert!(!parse_args(&["x"]).quit_if_one_screen);
+    }
+
+    #[test]
+    fn ignore_case_flags() {
+        use CaseMode::*;
+        assert_eq!(parse_args(&[]).case_mode, Sensitive);
+        assert_eq!(parse_args(&["-i", "x"]).case_mode, Smart);
+        assert_eq!(parse_args(&["--ignore-case", "x"]).case_mode, Smart);
+        assert_eq!(parse_args(&["-I", "x"]).case_mode, Insensitive);
+        assert_eq!(parse_args(&["--IGNORE-CASE", "x"]).case_mode, Insensitive);
+    }
+
+    #[test]
+    fn highlight_mode_flags() {
+        use HighlightMode::*;
+        assert_eq!(parse_args(&[]).highlight, All);
+        assert_eq!(parse_args(&["-g", "x"]).highlight, Last);
+        assert_eq!(parse_args(&["--hilite-search", "x"]).highlight, Last);
+        assert_eq!(parse_args(&["-G", "x"]).highlight, None);
+        assert_eq!(parse_args(&["--HILITE-SEARCH", "x"]).highlight, None);
     }
 
     #[test]

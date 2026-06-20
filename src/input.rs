@@ -25,6 +25,9 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Char('q') | KeyCode::Char('Q') => state.quit(),
         KeyCode::Char('c') if ctrl => state.quit(),
         KeyCode::Esc => state.quit(),
+        // repaint — must be matched before the pan bindings since 'l' with
+        // Ctrl would otherwise be caught by the bare `Char('l')` arm.
+        KeyCode::Char('l') if ctrl => state.repaint(),
         // movement (one line)
         KeyCode::Char('j') | KeyCode::Char('e') | KeyCode::Down => state.scroll_down(1),
         KeyCode::Char('k') | KeyCode::Char('y') | KeyCode::Up => state.scroll_up(1),
@@ -51,6 +54,11 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Char('/') => state.start_search(),
         KeyCode::Char('n') => state.next_match(),
         KeyCode::Char('N') => state.prev_match(),
+        // highlight toggles (Esc-u / Esc-U)
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::ALT) => state.toggle_highlight(),
+        KeyCode::Char('U') if key.modifiers.contains(KeyModifiers::ALT) => state.clear_search(),
+        // repaint (r)
+        KeyCode::Char('r') => state.repaint(),
         // help
         KeyCode::Char('?') => state.toggle_help(),
         _ => {}
@@ -333,5 +341,54 @@ mod tests {
         assert!(s.line_count() < full, "folding should reduce visible lines");
         handle_key(&mut s, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(s.line_count(), full);
+    }
+
+    // -- repaint / highlight toggles -----------------------------------------
+
+    #[test]
+    fn r_repaint_is_a_noop() {
+        let mut s = state("hello");
+        let initial_offset = s.offset;
+        handle_key(&mut s, key('r'));
+        assert_eq!(s.offset, initial_offset);
+        assert!(!s.quit);
+    }
+
+    #[test]
+    fn ctrl_l_repaint_is_a_noop() {
+        let mut s = state("hello");
+        handle_key(
+            &mut s,
+            KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(s.offset, 0);
+        assert!(!s.quit);
+    }
+
+    #[test]
+    fn alt_u_toggles_highlight() {
+        use crate::pager::HighlightMode;
+        let mut s = state("hello");
+        assert_eq!(s.highlight, HighlightMode::All);
+        handle_key(&mut s, KeyEvent::new(KeyCode::Char('u'), KeyModifiers::ALT));
+        assert_eq!(s.highlight, HighlightMode::None);
+        handle_key(&mut s, KeyEvent::new(KeyCode::Char('u'), KeyModifiers::ALT));
+        assert_eq!(s.highlight, HighlightMode::All);
+    }
+
+    #[test]
+    fn alt_uppercase_u_clears_search() {
+        use crate::pager::HighlightMode;
+        let mut s = state("hello\nhello");
+        s.start_search();
+        for c in "hello".chars() {
+            s.search_append(c);
+        }
+        s.finalize_search();
+        assert!(s.search.is_some());
+
+        handle_key(&mut s, KeyEvent::new(KeyCode::Char('U'), KeyModifiers::ALT));
+        assert!(s.search.is_none());
+        assert_eq!(s.highlight, HighlightMode::None);
     }
 }

@@ -76,7 +76,17 @@ fn main() -> std::io::Result<()> {
             std::process::exit(1);
         }
     };
-    ratatui::run(|terminal| run_app(terminal, input, line_numbers, render_options))
+    ratatui::run(|terminal| {
+        run_app(
+            terminal,
+            input,
+            line_numbers,
+            render_options,
+            args.quit_if_one_screen,
+            args.case_mode,
+            args.highlight,
+        )
+    })
 }
 
 fn run_app(
@@ -84,6 +94,9 @@ fn run_app(
     input: source::Input,
     line_numbers: bool,
     render_options: RenderOptions,
+    quit_if_one_screen: bool,
+    case_mode: lessmd::search::CaseMode,
+    highlight: lessmd::pager::HighlightMode,
 ) -> std::io::Result<()> {
     let size = terminal.size()?;
     let prefix_source_lines = prefix_source_lines_for_height(size.height);
@@ -104,6 +117,8 @@ fn run_app(
     // Keep the full input for resize/search after first paint. The initial doc
     // may be a prefix, but the state should know about the real source.
     state.input = input.clone();
+    state.set_case_mode(case_mode);
+    state.set_highlight(highlight);
     let (enhanced_tx, enhanced_rx) = mpsc::channel::<EnhancedMsg>();
     let mut render_generation = 0;
     if use_prefix || initial_options != render_options {
@@ -155,6 +170,11 @@ fn run_app(
         }
         prev_offset = state.offset;
         terminal.draw(|frame| draw(frame, &mut state))?;
+        // `-F`: exit immediately if the rendered document fits in the viewport
+        // (status bar takes 1 line). Mirrors `less --quit-if-one-screen`.
+        if quit_if_one_screen && state.doc.lines.len() < size.height as usize {
+            return Ok(());
+        }
         if event::poll(Duration::from_millis(25))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -299,22 +319,29 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
         }
     }
     // Highlight search matches.
-    if let Some(search) = &state.search {
+    if let Some(search) = &state.search
+        && state.highlight != lessmd::pager::HighlightMode::None
+    {
         let query = &search.query;
         let current_doc_line = search.matches.get(search.current).copied();
         for (i, line) in lines.iter_mut().enumerate() {
             let doc_line = state.visible_indices.get(state.offset + i).copied();
-            if let Some(dl) = doc_line
-                && search.matches.contains(&dl)
-            {
+            if let Some(dl) = doc_line {
                 let is_current = current_doc_line == Some(dl);
-                let current_range = if is_current {
-                    lessmd::search::match_byte_offset(line, query)
-                        .map(|pos| (pos, pos + query.len()))
-                } else {
-                    None
+                let should_highlight = match state.highlight {
+                    lessmd::pager::HighlightMode::All => search.matches.contains(&dl),
+                    lessmd::pager::HighlightMode::Last => is_current,
+                    lessmd::pager::HighlightMode::None => false,
                 };
-                *line = lessmd::search::highlight_line(line, query, current_range);
+                if should_highlight {
+                    let current_range = if is_current {
+                        lessmd::search::match_byte_offset(line, query)
+                            .map(|pos| (pos, pos + query.len()))
+                    } else {
+                        None
+                    };
+                    *line = lessmd::search::highlight_line(line, query, current_range);
+                }
             }
         }
     }
