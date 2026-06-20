@@ -133,6 +133,10 @@ impl PagerState {
         self.doc = doc;
         self.render_options = render_options;
         self.viewport_overlay = None;
+        self.folded.clear();
+        self.outline_selection = self
+            .outline_selection
+            .min(self.doc.headings.len().saturating_sub(1));
         if let Some(s) = &self.search {
             let query = s.query.clone();
             let matches = search_lines(&self.doc.lines, &query, self.case_mode);
@@ -809,6 +813,22 @@ mod tests {
             .collect()
     }
 
+    fn text_input(text: &str) -> Input {
+        Input {
+            text: text.to_owned(),
+            render_mode: ResolvedMode::Text { ansi: false },
+            source_path: None,
+        }
+    }
+
+    fn markdown_input(text: &str) -> Input {
+        Input {
+            text: text.to_owned(),
+            render_mode: ResolvedMode::Markdown,
+            source_path: None,
+        }
+    }
+
     #[test]
     fn scroll_down_stops_at_max_offset() {
         let mut s = doc_with_n_lines(50);
@@ -934,6 +954,30 @@ mod tests {
 
         assert!(s.viewport_overlay.is_none());
         assert_eq!(plain(&s.visible_lines_panned()[0]), "replacement");
+    }
+
+    #[test]
+    fn replace_doc_clears_fold_state_for_new_headings() {
+        let mut s = fold_state("# A\n\nbody\n\n# B\n\nother");
+        s.toggle_fold();
+        assert!(!s.folded.is_empty());
+
+        let doc = Document::new(&text_input("replacement"), 80);
+        s.replace_doc(doc, RenderOptions::default());
+
+        assert!(s.folded.is_empty());
+        assert_eq!(s.visible_indices, vec![0]);
+    }
+
+    #[test]
+    fn replace_doc_clamps_outline_selection() {
+        let mut s = fold_state("# A\n\nbody\n\n# B\n\nother");
+        s.outline_selection = 1;
+        let doc = Document::new(&markdown_input("# Only\n\nbody"), 80);
+
+        s.replace_doc(doc, RenderOptions::default());
+
+        assert_eq!(s.outline_selection, 0);
     }
 
     #[test]
