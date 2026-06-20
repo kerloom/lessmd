@@ -363,7 +363,7 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
             if let Some(dl) = doc_line {
                 let is_current = current_doc_line == Some(dl);
                 let should_highlight = match state.highlight {
-                    lessmd::pager::HighlightMode::All => search.matches.contains(&dl),
+                    lessmd::pager::HighlightMode::All => search.contains_line(dl),
                     lessmd::pager::HighlightMode::Last => is_current,
                     lessmd::pager::HighlightMode::None => false,
                 };

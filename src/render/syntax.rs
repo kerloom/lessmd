@@ -57,17 +57,15 @@ pub fn highlight_code(code: &str, lang: &str) -> Option<Vec<Line<'static>>> {
 
     let token = lang.split_whitespace().next()?;
 
-    // Check cache first — avoids re-highlighting on resize.
-    let key = (token.to_owned(), code.to_owned());
+    let ps = &*SYNTAX_SET;
+    let (syntax, key) = resolve_syntax_and_cache_key(ps, token, code)?;
     if let Ok(cache) = HIGHLIGHT_CACHE.lock()
         && let Some(cached) = cache.get(&key)
     {
         return Some(cached.clone());
     }
 
-    let ps = &*SYNTAX_SET;
     let theme = THEME_SET.themes.get(THEME_NAME)?;
-    let syntax = resolve_syntax(ps, token)?;
 
     let mut h = HighlightLines::new(syntax, theme);
     let mut lines = Vec::new();
@@ -125,6 +123,17 @@ fn resolve_syntax<'a>(ps: &'a SyntaxSet, lang: &str) -> Option<&'a SyntaxReferen
         return ps.find_syntax_by_token(alias);
     }
     None
+}
+
+fn resolve_syntax_and_cache_key<'a>(
+    ps: &'a SyntaxSet,
+    lang: &str,
+    code: &str,
+) -> Option<(&'a SyntaxReference, (String, String))> {
+    let syntax = resolve_syntax(ps, lang)?;
+    // Use the resolved syntax name so aliases and info-string annotations
+    // share one cache entry (`rust`, `rs`, and `rust skip` all map to Rust).
+    Some((syntax, (syntax.name.clone(), code.to_owned())))
 }
 
 /// Map common markdown language names to file extensions syntect recognizes.
@@ -676,22 +685,29 @@ mod tests {
     #[test]
     fn cache_works_across_different_lang_annotations() {
         clear_cache();
-        // "rust" and "rs" both resolve to Rust syntax, but are cached
-        // under separate keys. Both should work correctly.
         let long = highlight_code("fn main() {}", "rust").unwrap();
         let short = highlight_code("fn main() {}", "rs").unwrap();
         // Same syntax, same output text.
         assert_eq!(plain(&long[0]), plain(&short[0]));
+
+        let ps = &*SYNTAX_SET;
+        let (_, long_key) = resolve_syntax_and_cache_key(ps, "rust", "fn main() {}").unwrap();
+        let (_, short_key) = resolve_syntax_and_cache_key(ps, "rs", "fn main() {}").unwrap();
+        assert_eq!(long_key, short_key);
     }
 
     #[test]
     fn cache_handles_lang_with_annotation() {
         clear_cache();
-        // "rust skip" — only "rust" is used as the key.
         let a = highlight_code("fn main() {}", "rust skip").unwrap();
         let b = highlight_code("fn main() {}", "rust").unwrap();
         // Both should produce the same result (same syntax, same code).
         assert_eq!(plain(&a[0]), plain(&b[0]));
+
+        let ps = &*SYNTAX_SET;
+        let (_, annotated_key) = resolve_syntax_and_cache_key(ps, "rust", "fn main() {}").unwrap();
+        let (_, bare_key) = resolve_syntax_and_cache_key(ps, "rust", "fn main() {}").unwrap();
+        assert_eq!(annotated_key, bare_key);
     }
 
     #[test]

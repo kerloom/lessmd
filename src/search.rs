@@ -25,6 +25,12 @@ pub struct SearchState {
     pub current: usize,
 }
 
+impl SearchState {
+    pub fn contains_line(&self, line: usize) -> bool {
+        self.matches.binary_search(&line).is_ok()
+    }
+}
+
 /// Return true if `line` contains `query` according to `case_mode`.
 fn line_contains(line: &Line, query: &str, case_mode: CaseMode) -> bool {
     let haystack = line_to_plain(line);
@@ -292,6 +298,18 @@ mod tests {
     fn no_matches_returns_empty() {
         let lines = vec![Line::raw("alpha")];
         assert!(search_lines(&lines, "zzz", CaseMode::Sensitive).is_empty());
+    }
+
+    #[test]
+    fn search_state_checks_matches_by_binary_search() {
+        let state = SearchState {
+            query: "x".to_owned(),
+            matches: vec![1, 3, 8],
+            current: 0,
+        };
+
+        assert!(state.contains_line(3));
+        assert!(!state.contains_line(4));
     }
 
     #[test]
