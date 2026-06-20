@@ -256,8 +256,10 @@ impl<'a> MdRenderer<'a> {
                         text,
                         line,
                     });
+                    self.flush_heading(level);
+                } else {
+                    self.flush();
                 }
-                self.flush();
                 self.push_blank();
             }
             TagEnd::BlockQuote(_) => {
@@ -431,6 +433,7 @@ impl<'a> MdRenderer<'a> {
     }
 
     fn start_item(&mut self) {
+        self.block_style = self.context_style();
         let bullet = match self.list_stack.last_mut() {
             Some(l) if l.ordered => {
                 let b = format!("{}. ", l.counter);
@@ -490,6 +493,39 @@ impl<'a> MdRenderer<'a> {
             let mut spans = Vec::new();
             if !p.is_empty() {
                 spans.push(prefix_span(p, self.quote_depth, self.prefix_style()));
+            }
+            spans.extend(wl.spans.iter().cloned());
+            self.out.push(Line::from(spans));
+        }
+    }
+
+    fn flush_heading(&mut self, level: HeadingLevel) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let content = std::mem::take(&mut self.pending);
+        let indent = "  ".repeat((level as usize).saturating_sub(1));
+        let icon = heading_icon(level);
+        let icon_color = match level {
+            HeadingLevel::H1 => Color::Cyan,
+            HeadingLevel::H2 => Color::Blue,
+            HeadingLevel::H3 => Color::Green,
+            HeadingLevel::H4 => Color::Yellow,
+            HeadingLevel::H5 => Color::Magenta,
+            HeadingLevel::H6 => Color::Gray,
+        };
+        let indent_span = Span::raw(indent.clone());
+        let icon_span = Span::styled(icon, Style::default().fg(icon_color));
+        let space_span = Span::raw(" ");
+        let prefix_w = indent.len() + 1 + 1;
+        let avail = self.width.saturating_sub(prefix_w).max(1);
+        let wrapped = wrap_line(&Line::from(content), avail);
+        for (i, wl) in wrapped.iter().enumerate() {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            spans.push(indent_span.clone());
+            if i == 0 {
+                spans.push(icon_span.clone());
+                spans.push(space_span.clone());
             }
             spans.extend(wl.spans.iter().cloned());
             self.out.push(Line::from(spans));
@@ -714,6 +750,17 @@ fn heading_style(level: HeadingLevel) -> Style {
         s = s.add_modifier(Modifier::UNDERLINED);
     }
     s
+}
+
+fn heading_icon(level: HeadingLevel) -> &'static str {
+    match level {
+        HeadingLevel::H1 => "\u{2460}",
+        HeadingLevel::H2 => "\u{2461}",
+        HeadingLevel::H3 => "\u{2462}",
+        HeadingLevel::H4 => "\u{2463}",
+        HeadingLevel::H5 => "\u{2464}",
+        HeadingLevel::H6 => "\u{2465}",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -958,9 +1005,15 @@ mod tests {
     fn renders_h1_with_bold_and_color() {
         let lines = render("# Title");
         let h = &lines[0];
-        assert!(h.spans[0].style.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(h.spans[0].style.fg, Some(Color::Cyan));
-        assert!(plain(h).contains("Title"));
+        let text = plain(h);
+        assert!(text.contains("Title"));
+        assert!(text.contains('\u{2460}'));
+        let bold = h
+            .spans
+            .iter()
+            .find(|s| s.style.add_modifier.contains(Modifier::BOLD))
+            .expect("heading text span should be bold");
+        assert_eq!(bold.style.fg, Some(Color::Cyan));
     }
 
     #[test]
@@ -970,14 +1023,40 @@ mod tests {
             .enumerate()
         {
             let lines = render(&format!("{level} H"));
-            assert!(plain(&lines[0]).contains("H"));
+            let text = plain(&lines[0]);
+            assert!(text.contains("H"));
+            let icon = [
+                '\u{2460}', '\u{2461}', '\u{2462}', '\u{2463}', '\u{2464}', '\u{2465}',
+            ][i];
+            assert!(text.contains(icon), "missing icon {icon:?} in {text:?}");
             assert!(
-                lines[0].spans[0]
-                    .style
-                    .add_modifier
-                    .contains(Modifier::BOLD)
+                lines[0]
+                    .spans
+                    .iter()
+                    .any(|s| s.style.add_modifier.contains(Modifier::BOLD)),
+                "no bold span in {text:?}"
             );
-            let _ = i;
+        }
+    }
+
+    #[test]
+    fn heading_icon_and_indent_match_level() {
+        let lines = render("# A\n\n## B\n\n### C\n\n#### D\n\n##### E\n\n###### F");
+        let expectations = [
+            (0, '\u{2460}', ""),
+            (2, '\u{2461}', "  "),
+            (4, '\u{2462}', "    "),
+            (6, '\u{2463}', "      "),
+            (8, '\u{2464}', "        "),
+            (10, '\u{2465}', "          "),
+        ];
+        for (line_idx, icon, indent) in expectations {
+            let text = plain(&lines[line_idx]);
+            let expected = format!("{indent}{icon} ");
+            assert!(
+                text.starts_with(&expected),
+                "line {line_idx}: expected to start with {expected:?}, got {text:?}"
+            );
         }
     }
 
@@ -1199,6 +1278,19 @@ mod tests {
     }
 
     #[test]
+    fn tight_list_after_heading_does_not_inherit_heading_color() {
+        let lines = render("## Goals\n\n- first\n- second");
+        let first = lines.iter().find(|l| plain(l).contains("first")).unwrap();
+        let text_span = first
+            .spans
+            .iter()
+            .find(|s| s.content.contains("first"))
+            .unwrap();
+
+        assert_eq!(text_span.style.fg, None);
+    }
+
+    #[test]
     fn renders_ordered_list_with_correct_numbers() {
         let md = "1. first\n2. second\n3. third";
         let lines = render(md);
@@ -1349,8 +1441,12 @@ mod tests {
         assert_eq!(out.headings[3].level, 1);
         assert_eq!(out.headings[3].text, "Another");
         // Heading line indices must point to the heading's first row.
-        assert_eq!(plain(&out.lines[out.headings[0].line]), "Title");
-        assert_eq!(plain(&out.lines[out.headings[1].line]), "Sub");
+        let l0 = plain(&out.lines[out.headings[0].line]);
+        assert!(l0.contains("Title"));
+        assert!(l0.contains('\u{2460}'));
+        let l1 = plain(&out.lines[out.headings[1].line]);
+        assert!(l1.contains("Sub"));
+        assert!(l1.contains('\u{2461}'));
     }
 
     #[test]

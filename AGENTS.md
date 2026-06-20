@@ -17,6 +17,7 @@ project is built and verified. Always run these before considering a task done.
 | `cargo test --no-default-features` | Run the minimal test suite without syntax/Mermaid deps |
 | `cargo run -- [path]` | Run the pager on a file or stdin (`-` = stdin) |
 | `cargo run -- --no-syntax --no-mermaid [path]` | Runtime-disable enhancements |
+| `xcrun codesign --force --sign - ~/.local/bin/lessmd` | Re-sign the installed binary after copy (macOS rejects the build's path-embedded ad-hoc signature, causing `SIGKILL` with `Code Signature Invalid`) |
 
 ## Pre-completion checklist
 

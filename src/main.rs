@@ -131,7 +131,6 @@ fn run_app(
                         continue;
                     }
                     state.set_viewport_overlay(lines);
-                    state.status = "enhanced viewport ready".to_owned();
                     terminal.clear()?;
                 }
                 EnhancedMsg::Full {
@@ -145,7 +144,6 @@ fn run_app(
                     }
                     state.width = width;
                     state.replace_doc(doc, options);
-                    state.status = "enhanced render ready".to_owned();
                     terminal.clear()?;
                 }
             }
@@ -408,7 +406,7 @@ fn draw_outline(frame: &mut Frame, state: &PagerState) {
     // Compute the longest heading line to size the popup width.
     let max_text_len = headings
         .iter()
-        .map(|h| heading_indent(h.level).len() + h.text.len())
+        .map(|h| heading_indent(h.level).len() + 2 + h.text.len())
         .max()
         .unwrap_or(0);
     let inner_w = (area.width as usize).saturating_sub(2);
@@ -424,13 +422,18 @@ fn draw_outline(frame: &mut Frame, state: &PagerState) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     for (i, h) in headings.iter().enumerate() {
         let indent = heading_indent(h.level);
+        let icon = heading_icon(h.level);
         let style = if i == sel {
             Style::default().fg(Color::Black).bg(Color::Cyan).bold()
         } else {
             Style::default()
         };
         let level_color = heading_color(h.level);
-        let mut spans = vec![Span::raw(indent)];
+        let mut spans = vec![
+            Span::raw(indent),
+            Span::styled(icon, Style::default().fg(level_color)),
+            Span::raw(" "),
+        ];
         spans.push(Span::styled(h.text.clone(), style.fg(level_color)));
         lines.push(Line::from(spans));
     }
@@ -450,6 +453,17 @@ fn draw_outline(frame: &mut Frame, state: &PagerState) {
 
 fn heading_indent(level: u8) -> String {
     "  ".repeat(level.saturating_sub(1) as usize)
+}
+
+fn heading_icon(level: u8) -> &'static str {
+    match level {
+        1 => "\u{2460}",
+        2 => "\u{2461}",
+        3 => "\u{2462}",
+        4 => "\u{2463}",
+        5 => "\u{2464}",
+        _ => "\u{2465}",
+    }
 }
 
 fn heading_color(level: u8) -> Color {
