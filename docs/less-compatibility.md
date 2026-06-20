@@ -25,6 +25,8 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 | `u ^U` | `Ctrl-U` | half-page up |
 | `g < ESC-< HOME` | `g` `Home` | first line |
 | `G > ESC-> END` | `G` `End` | last line |
+| `Ng` / `NG` | `Ng` / `NG` | jump to 1-based line N |
+| `Np` / `N%` | `Np` / `N%` | jump to N percent |
 | `ESC-) →` | `l` `→` (8 cols) | pan right |
 | `ESC-( ←` | `h` `←` (8 cols) | pan left |
 | `h H` | `?` | help (moved) |
@@ -62,7 +64,6 @@ and the plan for closing the gaps. Generated from a review of `less.hlp`,
 
 **Jumping**
 
-- `p` / `%` (jump to N percent)
 - `t` / `T` tags (we use these for headings)
 - `{` `(` `[` `}` `)` `]` and `ESC-^F` / `ESC-^B` (bracket matching)
 - `m` / `M` / `'` / `''` / `^X^X` / `ESC-m` (marks + go-to + clear)
@@ -174,7 +175,8 @@ The biggest **methodology** gap is end-to-end TUI testing:
 - [x] `-i` / `-I` / `--ignore-case` / `--IGNORE-CASE`
 - [x] `-g` / `-G` + `ESC-u` toggle / `ESC-U` clear
 - [x] `r` / `Ctrl-L` / `Ctrl-R` repaint
-- [ ] Numbered command args (`5j`, `10G`, `50%`, `+/pat-N`) — **next batch**
+- [x] Numbered command args for movement/search (`5j`, `10G`, `50%`, `2/pat`)
+- [ ] `+cmd` initial commands (`+G`, `+/pat`, `+/pat-N`)
 - [ ] `-e` / `-E` (auto-exit on EOF)
 - [ ] `-K` (Ctrl-C exits)
 - [ ] `-q` / `-Q` (silence bell)
