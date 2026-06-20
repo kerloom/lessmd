@@ -19,6 +19,21 @@ project is built and verified. Always run these before considering a task done.
 | `cargo run -- --no-syntax --no-mermaid [path]` | Runtime-disable enhancements |
 | `xcrun codesign --force --sign - ~/.local/bin/lessmd` | Re-sign the installed binary after copy (macOS rejects the build's path-embedded ad-hoc signature, causing `SIGKILL` with `Code Signature Invalid`) |
 
+## Release (GitHub Actions)
+
+Semi-automatic: you bump `version` in `Cargo.toml`, push to `master`, and the workflow releases if the version changed.
+
+1. Bump `version` in `Cargo.toml` and merge/push to `master`.
+2. The workflow runs when `Cargo.toml` changes, detects the version bump, and publishes `v{version}` with six pre-built binaries.
+
+Skipped automatically when:
+- `Cargo.toml` changed but the version line did not
+- a GitHub Release for that tag already exists
+
+To retry or override: *Actions → Release → Run workflow* with **force** (optional **draft**).
+
+Build targets: x86_64 + aarch64 for Linux, macOS, and Windows. Each release includes archives and `SHA256SUMS`.
+
 ## Pre-completion checklist
 
 Before marking any milestone task complete, all of these must pass:

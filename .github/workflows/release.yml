@@ -1,0 +1,182 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - Cargo.toml
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Release the current Cargo.toml version even if it did not change or already exists"
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: "Create as a draft release (review before publishing)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.resolve.outputs.release }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Resolve release tag
+        id: resolve
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
+        shell: bash
+        run: |
+          cargo_version="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          tag="v${cargo_version}"
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "Cargo.toml version must look like 0.2.2 (got: $cargo_version)"
+            exit 1
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if [ "$FORCE" = "true" ]; then
+              echo "Release $tag already exists; continuing because force=true"
+            else
+              echo "Release $tag already exists, skipping"
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "$FORCE" != "true" ]; then
+              previous_version="$(git show HEAD~1:Cargo.toml 2>/dev/null | grep '^version' | head -1 | sed 's/.*"\(.*\)".*/\1/' || true)"
+              if [ "$previous_version" = "$cargo_version" ]; then
+                echo "Version unchanged ($cargo_version); use force=true to release anyway"
+                echo "release=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+          else
+            previous_version="$(git show HEAD~1:Cargo.toml 2>/dev/null | grep '^version' | head -1 | sed 's/.*"\(.*\)".*/\1/' || true)"
+            if [ -z "$previous_version" ]; then
+              echo "No previous Cargo.toml on master; releasing $tag"
+            elif [ "$previous_version" = "$cargo_version" ]; then
+              echo "Cargo.toml changed but version unchanged ($cargo_version), skipping release"
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            else
+              echo "Version bumped: $previous_version -> $cargo_version"
+            fi
+          fi
+
+          echo "Releasing $tag"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: linux
+          # macOS
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          # Windows
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install Linux cross linker
+        if: matrix.cross == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }} --locked
+
+      - name: Ad-hoc sign (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --force --sign - "target/${{ matrix.target }}/release/lessmd"
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd "target/${{ matrix.target }}/release"
+          tar czf "${{ github.workspace }}/lessmd-${TAG}-${{ matrix.target }}.tar.gz" lessmd
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path "target/${{ matrix.target }}/release/lessmd.exe" `
+            -DestinationPath "lessmd-${env:TAG}-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lessmd-${{ matrix.target }}
+          path: lessmd-${{ env.TAG }}-${{ matrix.target }}.*
+
+  release:
+    name: publish release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum lessmd-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          generate_release_notes: true
+          files: dist/*
