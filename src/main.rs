@@ -218,7 +218,7 @@ fn run_app(
         if needs_draw && pending_resize.is_none() {
             // Force a full redraw on multi-line jumps (Ctrl-D/U, PgUp/Dn, g, G)
             // to bypass ratatui's diff optimizer, which can leave stale content.
-            if state.jumped(prev_offset) {
+            if state.jumped(prev_offset) || state.take_force_redraw() {
                 terminal.clear()?;
             }
             prev_offset = state.offset;

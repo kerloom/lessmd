@@ -87,6 +87,9 @@ pub struct PagerState {
     /// show syntax/Mermaid in the first screen before the full enhanced render
     /// completes. Only applies while `offset == 0`.
     pub viewport_overlay: Option<Vec<Line<'static>>>,
+    /// Force the next draw to clear the terminal first. Used when content is
+    /// re-rendered in place and may shrink, leaving stale cells otherwise.
+    force_redraw: bool,
     pub status: String,
     /// `-e` / `-E`: quit when the user tries to scroll past EOF.
     pub quit_at_eof: QuitAtEof,
@@ -142,6 +145,7 @@ impl PagerState {
             folded: HashSet::new(),
             visible_indices: Vec::new(),
             viewport_overlay: None,
+            force_redraw: false,
             status: String::new(),
             quit_at_eof: QuitAtEof::default(),
             quiet: false,
@@ -217,6 +221,12 @@ impl PagerState {
     /// content from surviving ratatui's diff optimization.
     pub fn jumped(&self, prev_offset: usize) -> bool {
         self.offset.abs_diff(prev_offset) > 1
+    }
+
+    pub fn take_force_redraw(&mut self) -> bool {
+        let force = self.force_redraw;
+        self.force_redraw = false;
+        force
     }
 
     pub fn visible_lines(&self) -> Vec<&Line<'static>> {
@@ -402,6 +412,7 @@ impl PagerState {
         );
         self.width = content_width_for_doc(wrap_width, self.line_numbers, &doc) as u16;
         self.replace_doc(doc, self.render_options);
+        self.force_redraw = true;
         self.status = match self.render_options.table_mode {
             TableMode::Truncate => "tables: truncate".to_owned(),
             TableMode::Expand => "tables: expand".to_owned(),
@@ -595,9 +606,10 @@ impl PagerState {
         self.quit = true;
     }
 
-    /// `r` / `^L` / `^R` repaint. Ratatui redraws the entire frame every tick
-    /// already, so this is a deliberate no-op kept for `less` muscle memory.
-    pub fn repaint(&mut self) {}
+    /// `r` / `^L` / `^R` repaint.
+    pub fn repaint(&mut self) {
+        self.force_redraw = true;
+    }
 
     /// Set the case-sensitivity mode for searches.
     pub fn set_case_mode(&mut self, mode: CaseMode) {
@@ -1186,6 +1198,15 @@ mod tests {
     }
 
     #[test]
+    fn table_mode_toggle_requests_full_redraw() {
+        let mut s = md_state("| a | b |\n| --- | --- |\n| x | y |", 24, 20);
+        assert!(!s.take_force_redraw());
+        s.toggle_table_mode();
+        assert!(s.take_force_redraw());
+        assert!(!s.take_force_redraw());
+    }
+
+    #[test]
     fn search_next_prev_wraps_around() {
         let text = "match\nmatch\nother\nmatch";
         // viewport = 3 - 1 = 2; max_offset = 4 - 2 = 2 (so line 3 clamps to 2)
@@ -1566,10 +1587,11 @@ mod tests {
     #[test]
     fn repaint_is_a_noop() {
         let mut s = make_state("hello\nworld", 24, 80);
-        // Just verify it doesn't panic or change state.
+        // Just verify it doesn't panic or change navigation state.
         s.repaint();
         assert_eq!(s.offset, 0);
         assert!(!s.quit);
+        assert!(s.take_force_redraw());
     }
 
     #[test]
