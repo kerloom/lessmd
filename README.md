@@ -6,21 +6,31 @@ Single static binary, no scripting runtimes. Built in Rust with [ratatui](https:
 
 ## Installation
 
-**Pre-built binary** (Linux, macOS, Windows):
+### Pre-built binary
+
+Install scripts detect your OS/architecture, download the matching release asset, verify its SHA256 checksum, and install the binary.
+
+**Linux / macOS:**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kerloom/lessmd/master/install.sh | sh
 ```
 
-Windows (PowerShell):
+**Windows (PowerShell):**
 
 ```powershell
 irm https://raw.githubusercontent.com/kerloom/lessmd/master/install.ps1 | iex
 ```
 
-Optional env vars: `LESSMD_VERSION`, `LESSMD_INSTALL`, `LESSMD_REPO`.
+Defaults: `~/.local/bin` on Unix, `%LOCALAPPDATA%\Programs\lessmd` on Windows.
 
-**From source** (requires Rust 1.85+):
+Optional env vars: `LESSMD_VERSION` (pin a release), `LESSMD_INSTALL`, `LESSMD_REPO`.
+
+Or download archives manually from [GitHub Releases](https://github.com/kerloom/lessmd/releases) (x86_64 and aarch64 builds for Linux, macOS, and Windows).
+
+### From source
+
+Requires Rust 1.85+ (edition 2024):
 
 ```sh
 cargo install --git https://github.com/kerloom/lessmd
@@ -35,7 +45,7 @@ cargo build --release
 # binary: target/release/lessmd
 ```
 
-On macOS, after copying the binary to `~/.local/bin`, re-sign it if the shell kills it with `Code Signature Invalid`:
+**macOS note:** the install scripts ad-hoc sign the binary after install. If you copy a built or downloaded binary yourself and macOS kills it with `Code Signature Invalid`, run:
 
 ```sh
 xcrun codesign --force --sign - ~/.local/bin/lessmd
@@ -47,7 +57,7 @@ xcrun codesign --force --sign - ~/.local/bin/lessmd
 - **Syntax highlighting** — fenced code blocks via syntect (disable with `--no-syntax`)
 - **Mermaid diagrams** — inline ASCII/Unicode rendering via figurehead (disable with `--no-mermaid`)
 - **Less-compatible navigation** — scroll, search, goto line/percent, digit prefixes (`5j`, `10G`)
-- **Markdown extras** — heading jump (`t`/`T`), outline (`o`), fold headings (`Tab`), table pan (`w`/`h`/`l`)
+- **Markdown extras** — heading jump (`t`/`T`), outline (`o`), fold headings (`Tab`), table width toggle and pan (`w`/`h`/`l`)
 - **Plain text mode** — auto-detect by extension (`.md`/`.markdown`), or force with `--markdown` / `--plain`
 - **Search** — forward/backward over rendered text; case modes and highlight options mirror `less`
 
@@ -73,17 +83,17 @@ See [docs/lessmd.md](docs/lessmd.md) for a fuller guide and [docs/less-compatibi
 ## Development
 
 ```sh
-cargo build
-cargo test
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --no-default-features -- -D warnings
+cargo test
+cargo test --no-default-features
 ```
 
 Build without optional features:
 
 ```sh
 cargo build --no-default-features
-cargo test --no-default-features
 ```
 
 `PagerState` and rendering logic are pure (no terminal I/O outside `main.rs`), so most behavior is covered by unit tests. See [AGENTS.md](AGENTS.md) for the full verify checklist and release process.
@@ -97,4 +107,4 @@ cargo test --no-default-features
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
