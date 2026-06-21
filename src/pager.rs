@@ -391,11 +391,19 @@ impl PagerState {
     }
 
     pub fn scroll_right(&mut self, n: usize) {
+        let before = self.h_offset;
         self.h_offset = (self.h_offset + n).min(self.max_h_offset());
+        if self.h_offset != before {
+            self.force_redraw = true;
+        }
     }
 
     pub fn scroll_left(&mut self, n: usize) {
+        let before = self.h_offset;
         self.h_offset = self.h_offset.saturating_sub(n);
+        if self.h_offset != before {
+            self.force_redraw = true;
+        }
     }
 
     pub fn toggle_table_mode(&mut self) {
@@ -1066,14 +1074,22 @@ mod tests {
         s.width = 5;
 
         assert_eq!(s.max_h_offset(), 11);
+        assert!(!s.take_force_redraw());
         s.scroll_right(8);
         assert_eq!(s.h_offset, 8);
+        assert!(s.take_force_redraw());
         s.scroll_right(8);
         assert_eq!(s.h_offset, 11);
+        assert!(s.take_force_redraw());
+        s.scroll_right(8);
+        assert_eq!(s.h_offset, 11);
+        assert!(!s.take_force_redraw());
         s.scroll_left(4);
         assert_eq!(s.h_offset, 7);
+        assert!(s.take_force_redraw());
         s.scroll_left(100);
         assert_eq!(s.h_offset, 0);
+        assert!(s.take_force_redraw());
     }
 
     #[test]

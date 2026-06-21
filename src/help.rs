@@ -28,7 +28,7 @@ pub fn help_text() -> Text<'static> {
         ("T", "previous heading"),
         ("o", "toggle outline (jump to heading)"),
         ("Tab", "toggle fold on heading"),
-        ("w", "toggle table truncate/expand"),
+        ("w", "toggle table truncate/expand (w)idth"),
         ("/", "start search (preceded by N = Nth match)"),
         ("?", "start backward search"),
         ("n", "next match"),
@@ -76,6 +76,6 @@ mod tests {
         assert!(text.contains("next heading"));
         assert!(text.contains("Tab"));
         assert!(text.contains("toggle fold"));
-        assert!(text.contains("toggle table truncate/expand"));
+        assert!(text.contains("toggle table truncate/expand (w)idth"));
     }
 }

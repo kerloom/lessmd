@@ -843,12 +843,24 @@ fn render_table_grid(tbl: TableBuilder, width: usize, table_mode: TableMode) -> 
     // (2 padding spaces + 1 right border). Fit within viewport.
     let col_w = match table_mode {
         TableMode::Truncate => fit_columns(&natural_w, width),
-        TableMode::Expand => natural_w,
+        TableMode::Expand => natural_w.clone(),
     };
+    let truncated = table_mode == TableMode::Truncate
+        && natural_w
+            .iter()
+            .zip(col_w.iter())
+            .any(|(natural, fitted)| natural > fitted);
 
     let border_style = Style::default().fg(Color::DarkGray);
     let header_style = Style::default().bold();
     let mut out = Vec::new();
+
+    if truncated {
+        out.push(Line::styled(
+            "Table truncated; press w to expand width",
+            Style::default().fg(Color::Gray),
+        ));
+    }
 
     out.push(Line::styled(
         make_border('┌', '┬', '┐', &col_w),
@@ -1469,6 +1481,7 @@ mod tests {
         let md = "| short | averyveryveryverylongcell |\n| --- | --- |\n| x | y |";
         let lines = render_markdown(md, 30).lines;
         let text = all_plain(&lines);
+        assert!(text.contains("Table truncated; press w to expand width"));
         // The long cell should be truncated (contains ellipsis somewhere)
         assert!(
             text.contains('…'),
@@ -1489,6 +1502,7 @@ mod tests {
         );
         let text = all_plain(&out.lines);
         assert!(text.contains("averyveryveryverylongcell"));
+        assert!(!text.contains("Table truncated; press w to expand width"));
         assert!(!text.contains('…'));
         assert!(out.lines.iter().any(|l| width_of(&plain(l)) > 30));
     }

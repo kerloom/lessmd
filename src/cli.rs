@@ -119,7 +119,7 @@ Keybindings (inside the pager):
   T                        previous heading
   o                        toggle outline (jump to heading)
   Tab                      toggle fold on heading
-  w                        toggle table truncate/expand
+  w                        toggle table truncate/expand (w)idth
   /                        start search (N before / = Nth match)
   ?                        start backward search
   n                        next search match
