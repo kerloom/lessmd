@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::document::Document;
-use crate::render::RenderOptions;
+use crate::render::{RenderOptions, TableMode};
 use crate::search::{CaseMode, SearchDirection, SearchState, search_lines};
 use crate::source::Input;
 
@@ -388,6 +388,26 @@ impl PagerState {
         self.h_offset = self.h_offset.saturating_sub(n);
     }
 
+    pub fn toggle_table_mode(&mut self) {
+        self.render_options.table_mode = match self.render_options.table_mode {
+            TableMode::Truncate => TableMode::Expand,
+            TableMode::Expand => TableMode::Truncate,
+        };
+        let wrap_width = self.current_wrap_width();
+        let doc = render_doc(
+            &self.input,
+            wrap_width,
+            self.line_numbers,
+            self.render_options,
+        );
+        self.width = content_width_for_doc(wrap_width, self.line_numbers, &doc) as u16;
+        self.replace_doc(doc, self.render_options);
+        self.status = match self.render_options.table_mode {
+            TableMode::Truncate => "tables: truncate".to_owned(),
+            TableMode::Expand => "tables: expand".to_owned(),
+        };
+    }
+
     // -- resize --------------------------------------------------------------
 
     pub fn resize(&mut self, height: u16, width: u16) {
@@ -428,6 +448,14 @@ impl PagerState {
         }
         self.rebuild_visible_indices();
         self.h_offset = self.h_offset.min(self.max_h_offset());
+    }
+
+    fn current_wrap_width(&self) -> u16 {
+        if self.line_numbers {
+            self.width.saturating_add(self.gutter_width() as u16).max(1)
+        } else {
+            self.width.max(1)
+        }
     }
 
     // -- search --------------------------------------------------------------
@@ -853,6 +881,16 @@ fn render_doc(
     }
     let narrowed2 = wrap_width.saturating_sub(g2 as u16).max(1);
     Document::new_with_options(input, narrowed2, render_options)
+}
+
+fn content_width_for_doc(wrap_width: u16, line_numbers: bool, doc: &Document) -> usize {
+    if line_numbers {
+        wrap_width
+            .saturating_sub(gutter_width(doc.line_count()) as u16)
+            .max(1) as usize
+    } else {
+        wrap_width.max(1) as usize
+    }
 }
 
 fn clip_line(line: &Line<'static>, start: usize, width: usize) -> Line<'static> {

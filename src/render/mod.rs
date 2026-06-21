@@ -12,10 +12,18 @@ pub mod mermaid;
 pub mod syntax;
 pub mod text;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TableMode {
+    #[default]
+    Truncate,
+    Expand,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderOptions {
     pub syntax: bool,
     pub mermaid: bool,
+    pub table_mode: TableMode,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -24,6 +32,7 @@ impl Default for RenderOptions {
         Self {
             syntax: cfg!(feature = "syntax"),
             mermaid: cfg!(feature = "mermaid"),
+            table_mode: TableMode::Truncate,
         }
     }
 }
@@ -58,5 +67,6 @@ mod tests {
         let options = RenderOptions::default();
         assert_eq!(options.syntax, cfg!(feature = "syntax"));
         assert_eq!(options.mermaid, cfg!(feature = "mermaid"));
+        assert_eq!(options.table_mode, TableMode::Truncate);
     }
 }

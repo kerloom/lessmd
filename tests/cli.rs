@@ -24,6 +24,8 @@ fn help_prints_usage_and_exits_successfully() {
     assert!(stdout.contains("Usage:"));
     assert!(stdout.contains("--no-syntax"));
     assert!(stdout.contains("--no-mermaid"));
+    assert!(stdout.contains("--expand-tables"));
+    assert!(stdout.contains("--truncate-tables"));
     assert!(stderr(&output).is_empty());
 }
 

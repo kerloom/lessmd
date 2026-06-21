@@ -87,6 +87,7 @@ fn main() -> std::io::Result<()> {
         render_options: RenderOptions {
             syntax: args.syntax,
             mermaid: args.mermaid,
+            table_mode: args.table_mode,
         },
         quit_if_one_screen: args.quit_if_one_screen,
         quit_on_intr: args.quit_on_intr,
@@ -109,7 +110,7 @@ fn main() -> std::io::Result<()> {
 fn run_app(
     terminal: &mut ratatui::DefaultTerminal,
     input: source::Input,
-    options: AppOptions,
+    mut options: AppOptions,
 ) -> std::io::Result<()> {
     let size = terminal.size()?;
     let prefix_source_lines = prefix_source_lines_for_height(size.height);
@@ -140,7 +141,7 @@ fn run_app(
     }
     let (enhanced_tx, enhanced_rx) = mpsc::channel::<EnhancedMsg>();
     let mut render_generation = 0;
-    if use_prefix || initial_options != options.render_options {
+    if use_prefix || enhancements_differ(initial_options, options.render_options) {
         render_generation += 1;
         spawn_background_render(
             enhanced_tx.clone(),
@@ -197,7 +198,7 @@ fn run_app(
             state.resize(h, w);
             terminal.clear()?;
             needs_draw = true;
-            if state.render_options != options.render_options {
+            if enhancements_differ(state.render_options, options.render_options) {
                 spawn_background_render(
                     enhanced_tx.clone(),
                     BackgroundRenderJob {
@@ -240,6 +241,7 @@ fn run_app(
                         return Ok(());
                     }
                     input::handle_key(&mut state, key);
+                    options.render_options.table_mode = state.render_options.table_mode;
                     needs_draw = true;
                     if state.quit {
                         return Ok(());
@@ -253,6 +255,10 @@ fn run_app(
             }
         }
     }
+}
+
+fn enhancements_differ(current: RenderOptions, requested: RenderOptions) -> bool {
+    current.syntax != requested.syntax || current.mermaid != requested.mermaid
 }
 
 fn is_interrupt_key(key: KeyEvent) -> bool {
@@ -319,6 +325,7 @@ fn initial_render_options(input: &source::Input, requested: RenderOptions) -> Re
         RenderOptions {
             syntax: false,
             mermaid: false,
+            ..requested
         }
     } else {
         requested
@@ -617,12 +624,14 @@ mod tests {
         let requested = RenderOptions {
             syntax: true,
             mermaid: true,
+            table_mode: lessmd::render::TableMode::Expand,
         };
         assert_eq!(
             initial_render_options(&input(ResolvedMode::Markdown), requested),
             RenderOptions {
                 syntax: false,
                 mermaid: false,
+                table_mode: lessmd::render::TableMode::Expand,
             }
         );
     }
@@ -632,6 +641,7 @@ mod tests {
         let requested = RenderOptions {
             syntax: true,
             mermaid: true,
+            table_mode: lessmd::render::TableMode::Truncate,
         };
         assert_eq!(
             initial_render_options(&input(ResolvedMode::Text { ansi: true }), requested),
@@ -644,11 +654,26 @@ mod tests {
         let requested = RenderOptions {
             syntax: false,
             mermaid: false,
+            table_mode: lessmd::render::TableMode::Truncate,
         };
         assert_eq!(
             initial_render_options(&input(ResolvedMode::Markdown), requested),
             requested
         );
+    }
+
+    #[test]
+    fn enhancement_diff_ignores_table_mode() {
+        let current = RenderOptions {
+            syntax: true,
+            mermaid: true,
+            table_mode: lessmd::render::TableMode::Truncate,
+        };
+        let requested = RenderOptions {
+            table_mode: lessmd::render::TableMode::Expand,
+            ..current
+        };
+        assert!(!enhancements_differ(current, requested));
     }
 
     #[test]

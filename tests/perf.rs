@@ -858,10 +858,12 @@ fn perf_startup_two_phase_render() {
     let enhanced = RenderOptions {
         syntax: true,
         mermaid: cfg!(feature = "mermaid"),
+        ..RenderOptions::default()
     };
     let plain_first = RenderOptions {
         syntax: false,
         mermaid: false,
+        ..RenderOptions::default()
     };
 
     for &n in &[10, 100, 500] {
@@ -897,6 +899,7 @@ fn perf_startup_viewport_overlay_render() {
     let enhanced = RenderOptions {
         syntax: true,
         mermaid: cfg!(feature = "mermaid"),
+        ..RenderOptions::default()
     };
 
     for &n in &[100, 500, 1000] {

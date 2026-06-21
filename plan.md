@@ -117,6 +117,10 @@ cargo test --features mermaid      # once phase 2 lands
 
 (These will also be recorded in `AGENTS.md` so future sessions know to run them.)
 
+## Session Tracker
+
+- 2026-06-21: Improved Markdown aesthetics: H1/H2 separators, no heading-level indentation, inline code backticks, framed code blocks. Added table render mode (`truncate` default, `expand` for horizontal panning) with `--expand-tables`, `--truncate-tables`, and runtime `w` toggle. Verified with fmt, clippy (default and no-default-features), and tests (default and no-default-features).
+
 ---
 
 ## Phased Delivery & Tests

@@ -14,7 +14,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::mermaid::{DefaultMermaidRenderer, MermaidRenderer};
 use super::text::wrap_line;
-use super::{RenderOptions, RenderOutput};
+use super::{RenderOptions, RenderOutput, TableMode};
 use crate::document::Heading;
 
 /// Render markdown `text` into a flat list of terminal lines wrapped to `width`.
@@ -722,7 +722,7 @@ impl<'a> MdRenderer<'a> {
         let Some(tbl) = self.table.take() else {
             return;
         };
-        let lines = render_table_grid(tbl, self.width);
+        let lines = render_table_grid(tbl, self.width, self.options.table_mode);
         self.out.extend(lines);
     }
 
@@ -821,7 +821,7 @@ fn heading_icon(level: HeadingLevel) -> &'static str {
 // Tables
 // ---------------------------------------------------------------------------
 
-fn render_table_grid(tbl: TableBuilder, width: usize) -> Vec<Line<'static>> {
+fn render_table_grid(tbl: TableBuilder, width: usize, table_mode: TableMode) -> Vec<Line<'static>> {
     let ncol = tbl.aligns.len().max(1);
     let mut all_rows: Vec<Vec<String>> = Vec::new();
     if let Some(h) = tbl.header {
@@ -841,7 +841,10 @@ fn render_table_grid(tbl: TableBuilder, width: usize) -> Vec<Line<'static>> {
 
     // Total table width = 1 (left border) + sum(col_w + 3) for each column
     // (2 padding spaces + 1 right border). Fit within viewport.
-    let col_w = fit_columns(&natural_w, width);
+    let col_w = match table_mode {
+        TableMode::Truncate => fit_columns(&natural_w, width),
+        TableMode::Expand => natural_w,
+    };
 
     let border_style = Style::default().fg(Color::DarkGray);
     let header_style = Style::default().bold();
@@ -1248,6 +1251,7 @@ mod tests {
             RenderOptions {
                 syntax: false,
                 mermaid: true,
+                ..RenderOptions::default()
             },
         );
         let code_span = out
@@ -1270,6 +1274,7 @@ mod tests {
             RenderOptions {
                 syntax: false,
                 mermaid: false,
+                ..RenderOptions::default()
             },
         );
         let text = all_plain(&out.lines);
@@ -1469,6 +1474,23 @@ mod tests {
             text.contains('…'),
             "expected ellipsis in truncated table: {text}"
         );
+    }
+
+    #[test]
+    fn expanded_table_keeps_natural_width() {
+        let md = "| short | averyveryveryverylongcell |\n| --- | --- |\n| x | y |";
+        let out = render_markdown_with_options(
+            md,
+            30,
+            RenderOptions {
+                table_mode: TableMode::Expand,
+                ..RenderOptions::default()
+            },
+        );
+        let text = all_plain(&out.lines);
+        assert!(text.contains("averyveryveryverylongcell"));
+        assert!(!text.contains('…'));
+        assert!(out.lines.iter().any(|l| width_of(&plain(l)) > 30));
     }
 
     #[test]

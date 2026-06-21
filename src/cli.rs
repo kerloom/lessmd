@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::pager::{HighlightMode, QuitAtEof};
+use crate::render::TableMode;
 pub use crate::search::CaseMode;
 use crate::search::SearchDirection;
 
@@ -32,6 +33,8 @@ pub struct Args {
     pub quit_at_eof: crate::pager::QuitAtEof,
     /// `-p` / `--pattern`: start at the first forward match for this pattern.
     pub pattern: Option<String>,
+    /// Table rendering mode: truncate to viewport width or expand for panning.
+    pub table_mode: TableMode,
 }
 
 impl Args {
@@ -78,6 +81,8 @@ Options:
   --plain           Force plain-text rendering and strip ANSI colors.
   --no-syntax       Disable fenced code syntax highlighting.
   --no-mermaid      Disable inline Mermaid rendering.
+  --expand-tables   Render tables at natural width for horizontal panning.
+  --truncate-tables Truncate tables to fit the viewport (default).
   -N, --line-numbers  Show line numbers in a left gutter.
   -F, --quit-if-one-screen  Exit if the whole file fits on the first screen.
   -K, --quit-on-intr  Exit immediately on Ctrl-C, even from prompts.
@@ -114,6 +119,7 @@ Keybindings (inside the pager):
   T                        previous heading
   o                        toggle outline (jump to heading)
   Tab                      toggle fold on heading
+  w                        toggle table truncate/expand
   /                        start search (N before / = Nth match)
   ?                        start backward search
   n                        next search match
@@ -147,6 +153,8 @@ pub fn parse<I: Iterator<Item = String>>(args: I) -> Result<Args, String> {
             "--plain" => out.mode = RenderMode::Plain,
             "--no-syntax" => out.syntax = false,
             "--no-mermaid" => out.mermaid = false,
+            "--expand-tables" => out.table_mode = TableMode::Expand,
+            "--truncate-tables" => out.table_mode = TableMode::Truncate,
             "-N" | "--line-numbers" => out.line_numbers = true,
             "-F" | "--quit-if-one-screen" => out.quit_if_one_screen = true,
             "-K" | "--quit-on-intr" => out.quit_on_intr = true,
@@ -285,6 +293,19 @@ mod tests {
         let a = parse_args(&["--no-syntax", "--no-mermaid", "x.md"]);
         assert!(!a.syntax);
         assert!(!a.mermaid);
+    }
+
+    #[test]
+    fn table_mode_flags() {
+        assert_eq!(parse_args(&["x.md"]).table_mode, TableMode::Truncate);
+        assert_eq!(
+            parse_args(&["--expand-tables", "x.md"]).table_mode,
+            TableMode::Expand
+        );
+        assert_eq!(
+            parse_args(&["--expand-tables", "--truncate-tables", "x.md"]).table_mode,
+            TableMode::Truncate
+        );
     }
 
     #[test]

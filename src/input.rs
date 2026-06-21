@@ -99,6 +99,8 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Char('o') => state.toggle_outline(),
         // folding
         KeyCode::Tab => state.toggle_fold(),
+        // table layout
+        KeyCode::Char('w') => state.toggle_table_mode(),
         // search
         KeyCode::Char('/') => state.start_search(),
         KeyCode::Char('?') => state.start_backward_search(),
@@ -162,6 +164,7 @@ fn handle_search_key(state: &mut PagerState, key: KeyEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::TableMode;
     use crate::source::{Input, ResolvedMode};
 
     fn state(text: &str) -> PagerState {
@@ -325,6 +328,16 @@ mod tests {
         assert_eq!(s.h_offset, 8);
         handle_key(&mut s, key('h'));
         assert_eq!(s.h_offset, 0);
+    }
+
+    #[test]
+    fn w_toggles_table_mode() {
+        let mut s = state("x");
+        assert_eq!(s.render_options.table_mode, TableMode::Truncate);
+        handle_key(&mut s, key('w'));
+        assert_eq!(s.render_options.table_mode, TableMode::Expand);
+        handle_key(&mut s, key('w'));
+        assert_eq!(s.render_options.table_mode, TableMode::Truncate);
     }
 
     #[test]
