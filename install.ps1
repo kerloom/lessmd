@@ -17,11 +17,32 @@ function Fail([string]$Message) {
     Write-Error "lessmd install: $Message"
 }
 
-$Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+# PSReadLine ships a stub RuntimeInformation type that shadows the real one unless
+# we qualify mscorlib. Fall back to PROCESSOR_ARCHITECTURE when needed.
+function Get-WindowsArch {
+    try {
+        $os = [System.Runtime.InteropServices.RuntimeInformation, mscorlib]::OSArchitecture.ToString()
+        if ($os) { return $os.ToLowerInvariant() }
+    } catch {
+        # ignore and try env fallback
+    }
+    switch ($env:PROCESSOR_ARCHITECTURE) {
+        "AMD64" { return "x64" }
+        "ARM64" { return "arm64" }
+        default {
+            if ($env:PROCESSOR_ARCHITECTURE) {
+                return $env:PROCESSOR_ARCHITECTURE.ToLowerInvariant()
+            }
+            return ""
+        }
+    }
+}
+
+$Arch = Get-WindowsArch
 switch ($Arch) {
-    "X64" { $Target = "x86_64-pc-windows-msvc" }
-    "Arm64" { $Target = "aarch64-pc-windows-msvc" }
-    default { Fail "unsupported Windows architecture: $Arch" }
+    "x64" { $Target = "x86_64-pc-windows-msvc" }
+    "arm64" { $Target = "aarch64-pc-windows-msvc" }
+    default { Fail "unsupported Windows architecture: $Arch (expected x64 or arm64)" }
 }
 
 if ($env:LESSMD_VERSION) {
