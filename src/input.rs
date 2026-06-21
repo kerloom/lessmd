@@ -90,7 +90,7 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Char('p') | KeyCode::Char('%') => match state.take_count() {
             Some(pct) => state.goto_percent(pct as u16),
             None => {
-                state.status = "expected count before p/%".to_owned();
+                state.set_status_message("expected count before p/%");
             }
         },
         // heading navigation

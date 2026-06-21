@@ -91,12 +91,18 @@ pub struct PagerState {
     /// re-rendered in place and may shrink, leaving stale cells otherwise.
     force_redraw: bool,
     pub status: String,
+    /// Milliseconds until an ephemeral status message auto-clears. Zero when
+    /// idle or after dismissal.
+    status_ttl_ms: u32,
     /// `-e` / `-E`: quit when the user tries to scroll past EOF.
     pub quit_at_eof: QuitAtEof,
     /// `-q` / `-Q`: suppress the terminal bell (no-op until a bell exists).
     pub quiet: bool,
     eof_attempts: u8,
 }
+
+/// How long ephemeral status messages stay visible without scrolling.
+pub const STATUS_MESSAGE_TTL_MS: u32 = 3000;
 
 impl PagerState {
     /// `height` is the *total* terminal height; one row is reserved for the
@@ -147,6 +153,7 @@ impl PagerState {
             viewport_overlay: None,
             force_redraw: false,
             status: String::new(),
+            status_ttl_ms: 0,
             quit_at_eof: QuitAtEof::default(),
             quiet: false,
             eof_attempts: 0,
@@ -213,6 +220,37 @@ impl PagerState {
             .map(|&i| line_width(&self.doc.lines[i]))
             .max()
             .unwrap_or(0)
+    }
+
+    /// Show a temporary status message (search feedback, heading label, etc.).
+    pub fn set_status_message(&mut self, msg: impl Into<String>) {
+        self.status = msg.into();
+        self.status_ttl_ms = STATUS_MESSAGE_TTL_MS;
+    }
+
+    pub fn clear_status_message(&mut self) {
+        self.status.clear();
+        self.status_ttl_ms = 0;
+    }
+
+    /// Age ephemeral status messages; called from the main event loop.
+    /// Returns `true` when the status line changed and the UI should redraw.
+    pub fn tick_status(&mut self, delta_ms: u32) -> bool {
+        if self.status_ttl_ms == 0 {
+            return false;
+        }
+        self.status_ttl_ms = self.status_ttl_ms.saturating_sub(delta_ms);
+        if self.status_ttl_ms == 0 {
+            self.status.clear();
+            return true;
+        }
+        false
+    }
+
+    fn dismiss_status_on_movement(&mut self) {
+        if !self.status.is_empty() {
+            self.clear_status_message();
+        }
     }
 
     /// Returns true when the viewport jumped by more than one line since
@@ -290,12 +328,17 @@ impl PagerState {
         if n == 0 {
             return;
         }
+        self.dismiss_status_on_movement();
         let before = self.offset;
         self.offset = (self.offset + n).min(self.max_offset());
         self.note_forward_scroll(before);
     }
 
     pub fn scroll_up(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        self.dismiss_status_on_movement();
         self.offset = self.offset.saturating_sub(n);
     }
 
@@ -312,6 +355,7 @@ impl PagerState {
         if n == 0 {
             return;
         }
+        self.dismiss_status_on_movement();
         let before = self.offset;
         let step = self.height.saturating_sub(1).max(1);
         self.offset = self
@@ -323,6 +367,10 @@ impl PagerState {
 
     /// `N b` — page up N times.
     pub fn page_up_n(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        self.dismiss_status_on_movement();
         let step = self.height.saturating_sub(1).max(1);
         self.offset = self.offset.saturating_sub(step.saturating_mul(n));
     }
@@ -342,6 +390,7 @@ impl PagerState {
         if n == 0 {
             return;
         }
+        self.dismiss_status_on_movement();
         let before = self.offset;
         let step = self.height / 2;
         self.offset = self
@@ -353,6 +402,10 @@ impl PagerState {
 
     /// `N Ctrl-U` — half-page up N times.
     pub fn half_page_up_n(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        self.dismiss_status_on_movement();
         let step = self.height / 2;
         self.offset = self.offset.saturating_sub(step.saturating_mul(n));
     }
@@ -381,16 +434,22 @@ impl PagerState {
     }
 
     pub fn goto_top(&mut self) {
+        self.dismiss_status_on_movement();
         self.offset = 0;
     }
 
     pub fn goto_bottom(&mut self) {
+        self.dismiss_status_on_movement();
         let before = self.offset;
         self.offset = self.max_offset();
         self.note_forward_scroll(before);
     }
 
     pub fn scroll_right(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        self.dismiss_status_on_movement();
         let before = self.h_offset;
         self.h_offset = (self.h_offset + n).min(self.max_h_offset());
         if self.h_offset != before {
@@ -399,6 +458,10 @@ impl PagerState {
     }
 
     pub fn scroll_left(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        self.dismiss_status_on_movement();
         let before = self.h_offset;
         self.h_offset = self.h_offset.saturating_sub(n);
         if self.h_offset != before {
@@ -421,10 +484,10 @@ impl PagerState {
         self.width = content_width_for_doc(wrap_width, self.line_numbers, &doc) as u16;
         self.replace_doc(doc, self.render_options);
         self.force_redraw = true;
-        self.status = match self.render_options.table_mode {
-            TableMode::Truncate => "tables: truncate".to_owned(),
-            TableMode::Expand => "tables: expand".to_owned(),
-        };
+        self.set_status_message(match self.render_options.table_mode {
+            TableMode::Truncate => "tables: truncate",
+            TableMode::Expand => "tables: expand",
+        });
     }
 
     // -- resize --------------------------------------------------------------
@@ -496,7 +559,7 @@ impl PagerState {
 
     pub fn cancel_search(&mut self) {
         self.mode = Mode::Normal;
-        self.status.clear();
+        self.clear_status_message();
     }
 
     pub fn search_backspace(&mut self) {
@@ -516,12 +579,12 @@ impl PagerState {
         if matches.is_empty() {
             self.search = None;
             self.pending_count = None;
-            self.status = format!("no matches for {query:?}");
+            self.set_status_message(format!("no matches for {query:?}"));
         } else {
             let n = self.pending_count.take().unwrap_or(1).max(1);
             let current = self.match_index_for_direction(&matches, direction, n);
             self.jump_to_doc_line(matches[current]);
-            self.status = format!("{}/{} matches", current + 1, matches.len());
+            self.set_status_message(format!("{}/{} matches", current + 1, matches.len()));
             self.search = Some(SearchState {
                 query,
                 direction,
@@ -581,7 +644,7 @@ impl PagerState {
         let cur = s.current;
         let total = len;
         self.jump_to_doc_line(line);
-        self.status = format!("{}/{} matches", cur + 1, total);
+        self.set_status_message(format!("{}/{} matches", cur + 1, total));
     }
 
     fn match_index_for_direction(
@@ -642,7 +705,7 @@ impl PagerState {
     pub fn clear_search(&mut self) {
         self.search = None;
         self.highlight = HighlightMode::None;
-        self.status.clear();
+        self.clear_status_message();
     }
 
     // -- digit-prefix count --------------------------------------------------
@@ -730,6 +793,7 @@ impl PagerState {
     /// Jump to a doc-line index, unfolding any section that contains it.
     /// Converts the doc-line to a visible-row position and sets `offset`.
     pub fn jump_to_doc_line(&mut self, doc_line: usize) {
+        self.dismiss_status_on_movement();
         // Unfold any section containing this line.
         let mut to_unfold: Vec<usize> = Vec::new();
         for &idx in &self.folded {
@@ -817,7 +881,7 @@ impl PagerState {
             let line = h.line;
             let text = h.text.clone();
             self.jump_to_doc_line(line);
-            self.status = text;
+            self.set_status_message(text);
         }
         self.show_outline = false;
     }
@@ -834,7 +898,7 @@ impl PagerState {
         let line = headings[idx].line;
         let text = headings[idx].text.clone();
         self.jump_to_doc_line(line);
-        self.status = text;
+        self.set_status_message(text);
     }
 
     /// Jump to the previous heading before the current offset (wraps around).
@@ -852,7 +916,7 @@ impl PagerState {
         let line = headings[idx].line;
         let text = headings[idx].text.clone();
         self.jump_to_doc_line(line);
-        self.status = text;
+        self.set_status_message(text);
     }
 }
 
@@ -1286,6 +1350,25 @@ mod tests {
         s.finalize_search();
         assert!(s.search.is_none());
         assert!(s.status.contains("no matches"));
+    }
+
+    #[test]
+    fn status_message_expires_after_ttl() {
+        let mut s = make_state("hello", 10, 80);
+        s.set_status_message("tables: expand");
+        assert_eq!(s.status, "tables: expand");
+        assert!(!s.tick_status(STATUS_MESSAGE_TTL_MS - 1));
+        assert_eq!(s.status, "tables: expand");
+        assert!(s.tick_status(1));
+        assert!(s.status.is_empty());
+    }
+
+    #[test]
+    fn scrolling_clears_status_message() {
+        let mut s = make_state(&"a\n".repeat(50), 10, 80);
+        s.set_status_message("tables: expand");
+        s.scroll_down(1);
+        assert!(s.status.is_empty());
     }
 
     #[test]

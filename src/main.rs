@@ -161,7 +161,16 @@ fn run_app(
     let mut needs_draw = true;
     let mut pending_resize: Option<(u16, u16)> = None;
     let mut last_resize_at: Option<Instant> = None;
+    let mut last_status_tick = Instant::now();
     loop {
+        let status_delta_ms = last_status_tick
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u32::MAX)) as u32;
+        last_status_tick = Instant::now();
+        if state.tick_status(status_delta_ms) {
+            needs_draw = true;
+        }
         while let Ok(msg) = enhanced_rx.try_recv() {
             match msg {
                 EnhancedMsg::Viewport { generation, lines } => {
