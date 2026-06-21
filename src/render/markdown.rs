@@ -884,7 +884,7 @@ fn render_table_grid(tbl: TableBuilder, width: usize, table_mode: TableMode) -> 
 }
 
 fn hint_line(text: &'static str) -> Line<'static> {
-    Line::styled(text, Style::default().fg(Color::Gray))
+    Line::from(Span::styled(text, Style::default().fg(Color::Gray)))
 }
 
 fn table_grid_width(col_w: &[usize]) -> usize {

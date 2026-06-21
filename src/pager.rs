@@ -1185,6 +1185,19 @@ mod tests {
     }
 
     #[test]
+    fn table_hint_stays_gray_after_clipping() {
+        let md = "| short | averyveryveryverylongcell |\n| --- | --- |\n| x | y |";
+        let s = PagerState::new(markdown_input(md), 10, 30, false);
+        let hint = s
+            .visible_lines_panned()
+            .into_iter()
+            .find(|line| plain(line).contains("Table truncated"))
+            .expect("expected table truncation hint");
+
+        assert_eq!(hint.spans[0].style.fg, Some(Color::Gray));
+    }
+
+    #[test]
     fn resize_clamps_horizontal_offset() {
         let mut s = make_state("short", 10, 20);
         s.doc.lines = vec![Line::raw("0123456789")];
