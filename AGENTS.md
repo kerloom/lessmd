@@ -34,6 +34,20 @@ To retry or override: *Actions → Release → Run workflow* with **force** (opt
 
 Build targets: x86_64 + aarch64 for Linux, macOS, and Windows. Each release includes archives and `SHA256SUMS`.
 
+## Install (pre-built)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kerloom/lessmd/master/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/kerloom/lessmd/master/install.ps1 | iex
+```
+
+Optional env vars: `LESSMD_VERSION`, `LESSMD_INSTALL`, `LESSMD_REPO`.
+
 ## Pre-completion checklist
 
 Before marking any milestone task complete, all of these must pass:
