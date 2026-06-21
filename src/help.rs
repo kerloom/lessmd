@@ -26,7 +26,7 @@ pub fn help_text() -> Text<'static> {
         ("N p / N %", "go to N percent into the file"),
         ("t", "next heading"),
         ("T", "previous heading"),
-        ("o", "toggle outline (jump to heading)"),
+        ("o", "toggle (o)utline (jump to heading)"),
         ("Tab", "toggle fold on heading"),
         ("w", "toggle table truncate/expand (w)idth"),
         ("/", "start search (preceded by N = Nth match)"),
@@ -37,7 +37,7 @@ pub fn help_text() -> Text<'static> {
         ("Esc-u", "toggle search-match highlighting"),
         ("Esc-U", "clear saved search + highlighting"),
         ("Ctrl-C", "abort search"),
-        ("H", "toggle this help"),
+        ("H", "toggle this (H)elp"),
         ("q / Q / Esc", "quit"),
     ];
 
@@ -68,11 +68,11 @@ mod tests {
     fn help_lists_help_key_and_horizontal_pan_keys() {
         let text = plain(&help_text());
         assert!(text.contains("H"));
-        assert!(text.contains("toggle this help"));
+        assert!(text.contains("toggle this (H)elp"));
         assert!(text.contains("start backward search"));
         assert!(text.contains("h / <-"));
         assert!(text.contains("l / ->"));
-        assert!(text.contains("outline"));
+        assert!(text.contains("toggle (o)utline"));
         assert!(text.contains("next heading"));
         assert!(text.contains("Tab"));
         assert!(text.contains("toggle fold"));

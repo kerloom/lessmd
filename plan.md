@@ -366,6 +366,7 @@ cargo test` (add `--features mermaid` from M3 on).
 - [x] section folding (`Tab` key with visible-line-map)
 - [ ] OSC8 clickable hyperlinks (deferred — ratatui 0.30 has no hyperlink support)
 - [x] syntax highlighting (moved to M5)
+- [x] table truncate/expand mode with consistent gray hints and horizontal pan guidance
 - [ ] lesskey-style config file
 - [ ] streaming for very large files (next session)
 - [x] per-feature tests added as each lands

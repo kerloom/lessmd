@@ -855,11 +855,11 @@ fn render_table_grid(tbl: TableBuilder, width: usize, table_mode: TableMode) -> 
     let header_style = Style::default().bold();
     let mut out = Vec::new();
 
+    let table_width = table_grid_width(&col_w);
     if truncated {
-        out.push(Line::styled(
-            "Table truncated; press w to expand width",
-            Style::default().fg(Color::Gray),
-        ));
+        out.push(hint_line("Table truncated; press w to expand width"));
+    } else if table_mode == TableMode::Expand && table_width > width {
+        out.push(hint_line("Use <-/-> or h/l to pan"));
     }
 
     out.push(Line::styled(
@@ -881,6 +881,14 @@ fn render_table_grid(tbl: TableBuilder, width: usize, table_mode: TableMode) -> 
         border_style,
     ));
     out
+}
+
+fn hint_line(text: &'static str) -> Line<'static> {
+    Line::styled(text, Style::default().fg(Color::Gray))
+}
+
+fn table_grid_width(col_w: &[usize]) -> usize {
+    1 + col_w.iter().map(|w| w + 3).sum::<usize>()
 }
 
 /// Shrink column widths proportionally so the total table fits within `width`.
@@ -1502,6 +1510,7 @@ mod tests {
         );
         let text = all_plain(&out.lines);
         assert!(text.contains("averyveryveryverylongcell"));
+        assert!(text.contains("Use <-/-> or h/l to pan"));
         assert!(!text.contains("Table truncated; press w to expand width"));
         assert!(!text.contains('…'));
         assert!(out.lines.iter().any(|l| width_of(&plain(l)) > 30));
