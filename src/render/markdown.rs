@@ -372,7 +372,10 @@ impl<'a> MdRenderer<'a> {
             return;
         }
         let style = self.current_style().fg(Color::Yellow);
+        let tick_style = self.current_style().fg(Color::DarkGray);
+        self.pending.push(Span::styled("`", tick_style));
         self.pending.push(Span::styled(text, style));
+        self.pending.push(Span::styled("`", tick_style));
     }
 
     fn html(&mut self, t: &str) {
@@ -523,7 +526,6 @@ impl<'a> MdRenderer<'a> {
             return;
         }
         let content = std::mem::take(&mut self.pending);
-        let indent = "  ".repeat((level as usize).saturating_sub(1));
         let icon = heading_icon(level);
         let icon_color = match level {
             HeadingLevel::H1 => Color::Cyan,
@@ -533,21 +535,29 @@ impl<'a> MdRenderer<'a> {
             HeadingLevel::H5 => Color::Magenta,
             HeadingLevel::H6 => Color::Gray,
         };
-        let indent_span = Span::raw(indent.clone());
         let icon_span = Span::styled(icon, Style::default().fg(icon_color));
         let space_span = Span::raw(" ");
-        let prefix_w = indent.len() + 1 + 1;
+        let prefix_w = 1 + 1;
         let avail = self.width.saturating_sub(prefix_w).max(1);
         let wrapped = wrap_line(&Line::from(content), avail);
         for (i, wl) in wrapped.iter().enumerate() {
             let mut spans: Vec<Span<'static>> = Vec::new();
-            spans.push(indent_span.clone());
             if i == 0 {
                 spans.push(icon_span.clone());
                 spans.push(space_span.clone());
             }
             spans.extend(wl.spans.iter().cloned());
             self.out.push(Line::from(spans));
+        }
+        if level <= HeadingLevel::H2 {
+            let underline = match level {
+                HeadingLevel::H1 => "━".repeat(self.width),
+                _ => "─".repeat(self.width.min(48)),
+            };
+            self.out.push(Line::styled(
+                underline,
+                Style::default().fg(icon_color).dim(),
+            ));
         }
     }
 
@@ -575,23 +585,21 @@ impl<'a> MdRenderer<'a> {
     fn push_code_block(&mut self, code: &str, lang: Option<&str>) {
         let prefix = self.cont_prefix.clone();
         let prefix_w = width_of(&prefix);
-        let avail = self.width.saturating_sub(prefix_w).max(1);
+        let gutter = "│ ";
+        let avail = self
+            .width
+            .saturating_sub(prefix_w + width_of(gutter))
+            .max(1);
         let pfx_style = self.prefix_style();
 
+        let mut top = String::from("┌");
         if let Some(l) = lang
             && !l.is_empty()
         {
             let l = sanitize_terminal_text(l, false);
-            let mut spans = Vec::new();
-            if !prefix.is_empty() {
-                spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
-            }
-            spans.push(Span::styled(
-                format!("┌─ {l}"),
-                Style::default().fg(Color::Gray),
-            ));
-            self.out.push(Line::from(spans));
+            top.push_str(&format!("─ {l}"));
         }
+        self.push_code_frame_line(&prefix, top, pfx_style);
 
         let highlighted: Option<Vec<Line<'static>>> = {
             #[cfg(feature = "syntax")]
@@ -619,6 +627,7 @@ impl<'a> MdRenderer<'a> {
                     if !prefix.is_empty() {
                         spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
                     }
+                    spans.push(Span::styled(gutter, Style::default().fg(Color::Gray)));
                     spans.extend(wl.spans.iter().cloned());
                     self.out.push(Line::from(spans));
                 }
@@ -627,8 +636,7 @@ impl<'a> MdRenderer<'a> {
             let code_style = Style::default().fg(Color::Yellow);
             for line in code.lines() {
                 if line.is_empty() {
-                    self.out
-                        .push(prefix_line(&prefix, self.quote_depth, pfx_style));
+                    self.push_code_frame_line(&prefix, "│".to_owned(), pfx_style);
                     continue;
                 }
                 let wrapped = wrap_line(
@@ -640,11 +648,22 @@ impl<'a> MdRenderer<'a> {
                     if !prefix.is_empty() {
                         spans.push(prefix_span(&prefix, self.quote_depth, pfx_style));
                     }
+                    spans.push(Span::styled(gutter, Style::default().fg(Color::Gray)));
                     spans.extend(wl.spans.iter().cloned());
                     self.out.push(Line::from(spans));
                 }
             }
         }
+        self.push_code_frame_line(&prefix, "└".to_owned(), pfx_style);
+    }
+
+    fn push_code_frame_line(&mut self, prefix: &str, frame: String, pfx_style: Style) {
+        let mut spans = Vec::new();
+        if !prefix.is_empty() {
+            spans.push(prefix_span(prefix, self.quote_depth, pfx_style));
+        }
+        spans.push(Span::styled(frame, Style::default().fg(Color::Gray)));
+        self.out.push(Line::from(spans));
     }
 
     fn push_rendered_mermaid(&mut self, rendered: &str) {
@@ -1087,24 +1106,32 @@ mod tests {
     }
 
     #[test]
-    fn heading_icon_and_indent_match_level() {
+    fn heading_icon_has_no_level_indent() {
         let lines = render("# A\n\n## B\n\n### C\n\n#### D\n\n##### E\n\n###### F");
         let expectations = [
-            (0, '\u{2460}', ""),
-            (2, '\u{2461}', "  "),
-            (4, '\u{2462}', "    "),
-            (6, '\u{2463}', "      "),
-            (8, '\u{2464}', "        "),
-            (10, '\u{2465}', "          "),
+            (0, '\u{2460}'),
+            (3, '\u{2461}'),
+            (6, '\u{2462}'),
+            (8, '\u{2463}'),
+            (10, '\u{2464}'),
+            (12, '\u{2465}'),
         ];
-        for (line_idx, icon, indent) in expectations {
+        for (line_idx, icon) in expectations {
             let text = plain(&lines[line_idx]);
-            let expected = format!("{indent}{icon} ");
+            let expected = format!("{icon} ");
             assert!(
                 text.starts_with(&expected),
                 "line {line_idx}: expected to start with {expected:?}, got {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn h1_and_h2_render_separator_lines() {
+        let lines = render("# A\n\n## B\n\n### C");
+        assert!(plain(&lines[1]).chars().all(|c| c == '━'));
+        assert!(plain(&lines[4]).chars().all(|c| c == '─'));
+        assert!(!all_plain(&lines).contains("③ C\n─"));
     }
 
     #[test]
@@ -1154,12 +1181,21 @@ mod tests {
     #[test]
     fn inline_code_is_yellow() {
         let lines = render("some `code` here");
+        assert_eq!(plain(&lines[0]), "some `code` here");
         let code_span = lines
             .iter()
             .flat_map(|l| l.spans.iter())
             .find(|s| s.content == "code")
             .unwrap();
         assert_eq!(code_span.style.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn code_block_is_framed() {
+        let lines = render("```rust\nfn main() {}\n```");
+        assert_eq!(plain(&lines[0]), "┌─ rust");
+        assert_eq!(plain(&lines[1]), "│ fn main() {}");
+        assert_eq!(plain(&lines[2]), "└");
     }
 
     #[test]

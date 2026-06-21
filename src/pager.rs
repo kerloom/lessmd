@@ -1309,8 +1309,8 @@ mod tests {
     #[test]
     fn toggle_outline_sets_selection_to_closest_heading() {
         let mut s = md_state("# A\n\ntext\n\n## B\n\ntext\n\n## C\n", 2, 80);
-        // Scroll to heading B (line 4).
-        s.offset = 4;
+        // Scroll to heading B.
+        s.offset = 5;
         s.toggle_outline();
         assert!(s.show_outline);
         assert_eq!(s.outline_selection, 1); // heading B
