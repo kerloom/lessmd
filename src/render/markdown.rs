@@ -119,6 +119,8 @@ struct MdRenderer<'a> {
     headings: Vec<Heading>,
     /// `Some(level)` while inside a heading; `None` otherwise.
     pending_heading: Option<HeadingLevel>,
+    /// Count of Mermaid blocks that failed to render and fell back to raw.
+    mermaid_failures: usize,
 }
 
 impl<'a> MdRenderer<'a> {
@@ -144,6 +146,7 @@ impl<'a> MdRenderer<'a> {
             in_cell: false,
             headings: Vec::new(),
             pending_heading: None,
+            mermaid_failures: 0,
         }
     }
 
@@ -151,6 +154,7 @@ impl<'a> MdRenderer<'a> {
         RenderOutput {
             lines: self.out,
             headings: self.headings,
+            mermaid_failures: self.mermaid_failures,
         }
     }
 
@@ -576,6 +580,7 @@ impl<'a> MdRenderer<'a> {
         match self.mermaid.render(code) {
             Ok(rendered) => self.push_rendered_mermaid(&rendered),
             Err(err) => {
+                self.mermaid_failures += 1;
                 self.push_code_block(code, Some("mermaid"));
                 self.push_mermaid_note(&err);
             }
@@ -713,7 +718,7 @@ impl<'a> MdRenderer<'a> {
         }
         spans.push(Span::styled(
             format!("mermaid render failed: {err}"),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(Color::Red),
         ));
         self.out.push(Line::from(spans));
     }
@@ -1365,6 +1370,20 @@ mod tests {
         assert!(text.contains("┌─ mermaid"));
         assert!(text.contains("unknownDiagram"));
         assert!(text.contains("mermaid render failed: mock failure"));
+    }
+
+    #[test]
+    fn counts_failed_mermaid_blocks() {
+        let md = "```mermaid\nA\n```\n\ntext\n\n```mermaid\nB\n```";
+        let out = render_markdown_with_mermaid(md, 80, &ErrMermaidRenderer);
+        assert_eq!(out.mermaid_failures, 2);
+    }
+
+    #[test]
+    fn successful_mermaid_blocks_are_not_counted_as_failures() {
+        let md = "```mermaid\nA\n```";
+        let out = render_markdown_with_mermaid(md, 80, &OkMermaidRenderer);
+        assert_eq!(out.mermaid_failures, 0);
     }
 
     #[cfg(feature = "mermaid")]

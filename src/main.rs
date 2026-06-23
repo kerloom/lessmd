@@ -435,8 +435,13 @@ fn draw(frame: &mut Frame, state: &mut PagerState) {
 
     frame.render_widget(Paragraph::new(Text::from(lines)), main);
 
+    let status_color = if state.status_is_error() {
+        Color::Red
+    } else {
+        Color::Yellow
+    };
     frame.render_widget(
-        Paragraph::new(status_line(state)).style(Style::default().fg(Color::Yellow)),
+        Paragraph::new(status_line(state)).style(Style::default().fg(status_color)),
         status_area,
     );
 

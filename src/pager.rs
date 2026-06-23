@@ -94,6 +94,9 @@ pub struct PagerState {
     /// Milliseconds until an ephemeral status message auto-clears. Zero when
     /// idle or after dismissal.
     status_ttl_ms: u32,
+    /// Whether the current status message is an error (drawn in red) rather
+    /// than a normal hint.
+    status_is_error: bool,
     /// `-e` / `-E`: quit when the user tries to scroll past EOF.
     pub quit_at_eof: QuitAtEof,
     /// `-q` / `-Q`: suppress the terminal bell (no-op until a bell exists).
@@ -154,6 +157,7 @@ impl PagerState {
             force_redraw: false,
             status: String::new(),
             status_ttl_ms: 0,
+            status_is_error: false,
             quit_at_eof: QuitAtEof::default(),
             quiet: false,
             eof_attempts: 0,
@@ -163,9 +167,15 @@ impl PagerState {
     }
 
     pub fn replace_doc(&mut self, doc: Document, render_options: RenderOptions) {
+        let mermaid_failures = doc.mermaid_failures;
         self.doc = doc;
         self.render_options = render_options;
         self.viewport_overlay = None;
+        if mermaid_failures > 0 {
+            self.set_error_message(mermaid_failure_message(mermaid_failures));
+        } else {
+            self.clear_status_message();
+        }
         self.folded.clear();
         self.outline_selection = self
             .outline_selection
@@ -224,13 +234,29 @@ impl PagerState {
 
     /// Show a temporary status message (search feedback, heading label, etc.).
     pub fn set_status_message(&mut self, msg: impl Into<String>) {
+        self.set_status(msg, false);
+    }
+
+    /// Like [`set_status_message`] but drawn in red.
+    pub fn set_error_message(&mut self, msg: impl Into<String>) {
+        self.set_status(msg, true);
+    }
+
+    fn set_status(&mut self, msg: impl Into<String>, is_error: bool) {
         self.status = msg.into();
         self.status_ttl_ms = STATUS_MESSAGE_TTL_MS;
+        self.status_is_error = is_error;
+    }
+
+    /// Whether the current status message should be rendered as an error.
+    pub fn status_is_error(&self) -> bool {
+        self.status_is_error
     }
 
     pub fn clear_status_message(&mut self) {
         self.status.clear();
         self.status_ttl_ms = 0;
+        self.status_is_error = false;
     }
 
     /// Age ephemeral status messages; called from the main event loop.
@@ -242,6 +268,7 @@ impl PagerState {
         self.status_ttl_ms = self.status_ttl_ms.saturating_sub(delta_ms);
         if self.status_ttl_ms == 0 {
             self.status.clear();
+            self.status_is_error = false;
             return true;
         }
         false
@@ -939,6 +966,14 @@ fn gutter_width(n: usize) -> usize {
 /// numbers are enabled. Uses a two-pass approach: first render at full
 /// width to count lines, then re-render at the narrowed width so the
 /// gutter doesn't eat into the content.
+fn mermaid_failure_message(n: usize) -> String {
+    if n == 1 {
+        "1 mermaid diagram failed to render (shown as source)".to_owned()
+    } else {
+        format!("{n} mermaid diagrams failed to render (shown as source)")
+    }
+}
+
 fn render_doc(
     input: &Input,
     wrap_width: u16,
@@ -1195,11 +1230,74 @@ mod tests {
             lines: vec![Line::raw("replacement")],
             headings: Vec::new(),
             source_path: None,
+            mermaid_failures: 0,
         };
         s.replace_doc(doc, RenderOptions::default());
 
         assert!(s.viewport_overlay.is_none());
         assert_eq!(plain(&s.visible_lines_panned()[0]), "replacement");
+    }
+
+    #[test]
+    fn replace_doc_with_mermaid_failures_sets_red_error_status() {
+        let mut s = doc_with_n_lines(5);
+        let doc = Document {
+            lines: vec![Line::raw("replacement")],
+            headings: Vec::new(),
+            source_path: None,
+            mermaid_failures: 2,
+        };
+        s.replace_doc(doc, RenderOptions::default());
+        assert!(s.status_is_error());
+        assert!(s.status.contains("2 mermaid diagrams failed"));
+    }
+
+    #[test]
+    fn replace_doc_without_mermaid_failures_sets_no_error() {
+        let mut s = doc_with_n_lines(5);
+        let doc = Document {
+            lines: vec![Line::raw("replacement")],
+            headings: Vec::new(),
+            source_path: None,
+            mermaid_failures: 0,
+        };
+        s.replace_doc(doc, RenderOptions::default());
+        assert!(!s.status_is_error());
+        assert!(s.status.is_empty());
+    }
+
+    #[test]
+    fn replace_doc_with_no_failures_clears_stale_error_status() {
+        let mut s = doc_with_n_lines(5);
+        s.set_error_message("previous doc had failures");
+        assert!(s.status_is_error());
+
+        let doc = Document {
+            lines: vec![Line::raw("clean replacement")],
+            headings: Vec::new(),
+            source_path: None,
+            mermaid_failures: 0,
+        };
+        s.replace_doc(doc, RenderOptions::default());
+        assert!(!s.status_is_error(), "stale error flag must be cleared");
+        assert!(s.status.is_empty(), "stale error text must be cleared");
+    }
+
+    #[test]
+    fn error_status_is_dismissed_on_movement() {
+        let mut s = doc_with_n_lines(50);
+        s.set_error_message("boom");
+        assert!(s.status_is_error());
+        s.scroll_down(1);
+        assert!(!s.status_is_error());
+        assert!(s.status.is_empty());
+    }
+
+    #[test]
+    fn normal_status_is_not_flagged_as_error() {
+        let mut s = doc_with_n_lines(5);
+        s.set_status_message("hint");
+        assert!(!s.status_is_error());
     }
 
     #[test]

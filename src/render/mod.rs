@@ -41,6 +41,8 @@ impl Default for RenderOptions {
 pub struct RenderOutput {
     pub lines: Vec<Line<'static>>,
     pub headings: Vec<Heading>,
+    /// Mermaid diagrams that failed to render and fell back to raw source.
+    pub mermaid_failures: usize,
 }
 
 /// Render the whole document up-front to a flat list of terminal rows,
