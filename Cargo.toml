@@ -1,6 +1,6 @@
 [package]
 name = "lessmd"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 description = "A less-like terminal pager that renders markdown and mermaid"
 license = "MIT"
@@ -15,7 +15,7 @@ ratatui = "0.30.2"
 crossterm = "0.29.0"
 unicode-width = "0.2"
 pulldown-cmark = "0.13"
-figurehead = { version = "0.4", optional = true, features = ["sequence", "class"] }
+figurehead = { git = "https://github.com/kerloom/figurehead-rs", branch = "master", optional = true, features = ["sequence", "class"] }
 syntect = { version = "5.3", optional = true, default-features = false, features = ["parsing", "default-syntaxes", "default-themes", "dump-load", "regex-fancy"] }
 
 [profile.release]
