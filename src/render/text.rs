@@ -30,6 +30,7 @@ pub fn render_text(text: &str, width: u16, ansi: bool) -> RenderOutput {
     RenderOutput {
         lines,
         headings: Vec::new(),
+        mermaid_failures: 0,
     }
 }
 

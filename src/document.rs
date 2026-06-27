@@ -25,6 +25,8 @@ pub struct Document {
     pub lines: Vec<Line<'static>>,
     pub headings: Vec<Heading>,
     pub source_path: Option<PathBuf>,
+    /// Number of Mermaid diagrams that failed to render and fell back to raw.
+    pub mermaid_failures: usize,
 }
 
 impl Document {
@@ -39,6 +41,7 @@ impl Document {
             lines: output.lines,
             headings: output.headings,
             source_path: input.source_path.clone(),
+            mermaid_failures: output.mermaid_failures,
         }
     }
 

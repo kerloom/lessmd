@@ -478,8 +478,7 @@ checksum = "dd2e7510819d6fbf51a5545c8f922716ecfb14df168a3242f7d33e0239efe6a1"
 [[package]]
 name = "figurehead"
 version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ec2410d35b21aac89718107336d210bafc29aa83f03088463ecde62312557ff"
+source = "git+https://github.com/kerloom/figurehead-rs?branch=master#3fffed5607824984e6a2f77886ea07a0403bf321"
 dependencies = [
  "anyhow",
  "chumsky",
@@ -764,7 +763,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lessmd"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "crossterm",
  "figurehead",
