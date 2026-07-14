@@ -25,19 +25,43 @@ impl MermaidRenderer for DefaultMermaidRenderer {
             return cached;
         }
 
+        // Cyclic state diagrams make figurehead allocate forever; refuse them
+        // before spawning a worker (a timed-out thread cannot be killed and
+        // will eventually OOM the process).
+        let prepared = match prepare_mermaid_source(source) {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                let result = Err(err);
+                cache_insert(source.to_owned(), result.clone());
+                return result;
+            }
+        };
+
         install_quiet_mermaid_hook();
-        let owned = source.to_owned();
-        let result = run_with_timeout(RENDER_TIMEOUT, move || render_attempt(&owned));
+        let timeout = render_timeout_for(source);
+        let result = run_with_timeout(timeout, move || render_attempt_prepared(&prepared));
         cache_insert(source.to_owned(), result.clone());
         result
     }
 }
 
-/// Some inputs (e.g. certain `stateDiagram-v2` graphs) hang figurehead's
-/// layout engine. A panic is catchable, a hang is not, so each diagram runs on
-/// its own thread and is abandoned after this deadline.
+/// Fallback deadline when figurehead hangs despite pre-checks. Prefer refusing
+/// known-bad inputs in [`prepare_mermaid_source`] so we never spawn a runaway.
 #[cfg(feature = "mermaid")]
 const RENDER_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Acyclic state diagrams finish in <1ms; keep a short leash as a backstop.
+#[cfg(feature = "mermaid")]
+const STATE_RENDER_TIMEOUT: Duration = Duration::from_millis(250);
+
+#[cfg(feature = "mermaid")]
+fn render_timeout_for(source: &str) -> Duration {
+    if is_state_diagram(source) {
+        STATE_RENDER_TIMEOUT
+    } else {
+        RENDER_TIMEOUT
+    }
+}
 
 #[cfg(feature = "mermaid")]
 const MERMAID_THREAD: &str = "lessmd-mermaid";
@@ -68,21 +92,48 @@ where
     match rx.recv_timeout(timeout) {
         Ok(result) => result,
         Err(RecvTimeoutError::Timeout) => {
-            Err(format!("render timed out after {}s", timeout.as_secs()))
+            Err(format!("render timed out after {}ms", timeout.as_millis()))
         }
         Err(RecvTimeoutError::Disconnected) => {
-            // Defensive: `render_attempt` swallows panics via `catch_panic`,
-            // so the worker should never close the channel abruptly. If it
-            // ever does, surface a message rather than hanging.
             Err("mermaid worker stopped unexpectedly".to_owned())
         }
     }
 }
 
-/// Render `source`, retrying once with self-messages stripped (figurehead
-/// panics on sequence-diagram self-messages).
+/// True when the first non-empty, non-`%%` line starts with `stateDiagram`.
 #[cfg(feature = "mermaid")]
-fn render_attempt(source: &str) -> Result<String, String> {
+fn is_state_diagram(source: &str) -> bool {
+    mermaid_body_starts_with(source, "stateDiagram")
+}
+
+#[cfg(feature = "mermaid")]
+fn mermaid_body_starts_with(source: &str, prefix: &str) -> bool {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("%%") {
+            continue;
+        }
+        return trimmed.starts_with(prefix);
+    }
+    false
+}
+
+/// Strip state self-loops and refuse cyclic graphs (figurehead hangs / OOMs).
+#[cfg(feature = "mermaid")]
+fn prepare_mermaid_source(source: &str) -> Result<String, String> {
+    if !is_state_diagram(source) {
+        return Ok(source.to_owned());
+    }
+    let sanitized = sanitize_state_self_loops(source).unwrap_or_else(|| source.to_owned());
+    if state_diagram_has_cycle(&sanitized) {
+        return Err("state diagram has cycles (unsupported by renderer)".to_owned());
+    }
+    Ok(sanitized)
+}
+
+/// Retry once with sequence self-messages stripped (figurehead panics on those).
+#[cfg(feature = "mermaid")]
+fn render_attempt_prepared(source: &str) -> Result<String, String> {
     match render_with_figurehead(source) {
         Ok(rendered) => Ok(rendered),
         Err(first_err) => match sanitize_sequence(source) {
@@ -159,7 +210,7 @@ fn render_with_figurehead(source: &str) -> Result<String, String> {
 
 #[cfg(feature = "mermaid")]
 fn sanitize_sequence(source: &str) -> Option<String> {
-    if !source.trim_start().starts_with("sequenceDiagram") {
+    if !mermaid_body_starts_with(source, "sequenceDiagram") {
         return None;
     }
 
@@ -172,6 +223,44 @@ fn sanitize_sequence(source: &str) -> Option<String> {
             continue;
         }
 
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    changed.then_some(out)
+}
+
+/// Drop `A --> A` / `A --> A: label` lines outside note blocks. Figurehead's
+/// state layout hangs on self-transitions; stripping them lets the rest render.
+#[cfg(feature = "mermaid")]
+fn sanitize_state_self_loops(source: &str) -> Option<String> {
+    if !is_state_diagram(source) {
+        return None;
+    }
+
+    let mut changed = false;
+    let mut in_note = false;
+    let mut out = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("note ") {
+            // Single-line `note ...: text` has no body; multi-line notes continue
+            // until `end note`.
+            in_note = !trimmed.contains(':');
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if trimmed == "end note" {
+            in_note = false;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if !in_note && is_state_self_transition(trimmed) {
+            changed = true;
+            continue;
+        }
         out.push_str(line);
         out.push('\n');
     }
@@ -192,6 +281,94 @@ fn is_self_message(line: &str) -> bool {
         };
         let to = rest[..colon_pos].trim();
         return !from.is_empty() && from == to;
+    }
+    false
+}
+
+#[cfg(feature = "mermaid")]
+fn is_state_self_transition(line: &str) -> bool {
+    parse_state_edge(line).is_some_and(|(from, to)| from == to)
+}
+
+/// Parse `From --> To` / `From --> To: label` (first arrow only).
+#[cfg(feature = "mermaid")]
+fn parse_state_edge(line: &str) -> Option<(&str, &str)> {
+    for arrow in ["-->", "->"] {
+        let Some(arrow_pos) = line.find(arrow) else {
+            continue;
+        };
+        let from = line[..arrow_pos].trim();
+        if from.is_empty() {
+            continue;
+        }
+        let rest = &line[arrow_pos + arrow.len()..];
+        let to = rest.split(':').next().unwrap_or("").trim();
+        if to.is_empty() {
+            continue;
+        }
+        return Some((from, to));
+    }
+    None
+}
+
+/// True if the state-transition graph contains a cycle (including self-loops).
+///
+/// Mermaid uses `[*]` for both the initial and final pseudo-state; those are
+/// distinct endpoints, so outgoing `[*]` is treated as start and incoming
+/// `[*]` as end.
+#[cfg(feature = "mermaid")]
+fn state_diagram_has_cycle(source: &str) -> bool {
+    use std::collections::HashMap;
+
+    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut in_note = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("note ") {
+            in_note = !trimmed.contains(':');
+            continue;
+        }
+        if trimmed == "end note" {
+            in_note = false;
+            continue;
+        }
+        if in_note {
+            continue;
+        }
+        if let Some((from, to)) = parse_state_edge(trimmed) {
+            let from = if from == "[*]" { "__start__" } else { from };
+            let to = if to == "[*]" { "__end__" } else { to };
+            adj.entry(from).or_default().push(to);
+        }
+    }
+
+    // Iterative DFS: 0 = unvisited, 1 = on stack, 2 = done.
+    let mut color: HashMap<&str, u8> = HashMap::new();
+    let nodes: Vec<&str> = adj.keys().copied().collect();
+    for start in nodes {
+        if color.get(start).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+        let mut stack = vec![(start, 0usize)];
+        color.insert(start, 1);
+        while let Some(&(node, idx)) = stack.last() {
+            let nexts = adj.get(node).map(Vec::as_slice).unwrap_or(&[]);
+            if idx < nexts.len() {
+                let next = nexts[idx];
+                stack.last_mut().unwrap().1 = idx + 1;
+                match color.get(next).copied().unwrap_or(0) {
+                    1 => return true,
+                    2 => {}
+                    _ => {
+                        color.insert(next, 1);
+                        stack.push((next, 0));
+                    }
+                }
+            } else {
+                color.insert(node, 2);
+                stack.pop();
+            }
+        }
     }
     false
 }
@@ -315,6 +492,85 @@ mod tests {
         let err = catch_panic(|| std::panic::panic_any("boom")).unwrap_err();
         std::panic::set_hook(prev);
         assert_eq!(err, "mermaid renderer panicked: boom");
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn sanitize_state_strips_self_transitions() {
+        let src =
+            "stateDiagram-v2\n    [*] --> A\n    A --> A: again\n    A --> B\n    B --> [*]\n";
+        let sanitized = sanitize_state_self_loops(src).expect("should strip self-loop");
+        assert!(!sanitized.contains("A --> A"));
+        assert!(sanitized.contains("A --> B"));
+        assert!(sanitize_state_self_loops("stateDiagram-v2\n    [*] --> A\n").is_none());
+        assert!(sanitize_state_self_loops("graph LR\nA --> A\n").is_none());
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn state_diagram_with_self_loop_renders_without_timeout() {
+        let _guard = cache_test_lock();
+        clear_cache();
+        let src = "stateDiagram-v2\n    [*] --> A\n    A --> A: again\n    A --> [*]\n";
+        let started = std::time::Instant::now();
+        let output = DefaultMermaidRenderer.render(src).expect("should render");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "self-loop should be stripped before figurehead, took {:?}",
+            started.elapsed()
+        );
+        assert!(!output.trim().is_empty());
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn cyclic_state_diagram_fails_quickly_not_full_timeout() {
+        let _guard = cache_test_lock();
+        clear_cache();
+        // Back-edge A --> B --> A must be refused before figurehead runs.
+        let src = "stateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> A\n    A --> [*]\n";
+        let started = std::time::Instant::now();
+        let err = DefaultMermaidRenderer.render(src).unwrap_err();
+        let elapsed = started.elapsed();
+        assert!(err.contains("cycles"), "expected cycle refusal, got: {err}");
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "cycle check should be instant, took {elapsed:?}: {err}"
+        );
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn state_cycle_check_detects_back_edges() {
+        assert!(state_diagram_has_cycle(
+            "stateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> A\n"
+        ));
+        assert!(!state_diagram_has_cycle(
+            "stateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> [*]\n"
+        ));
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn leading_mermaid_comments_still_detect_state_cycles() {
+        let src = "%% comment\n%%{init: {'theme': 'dark'}}%%\nstateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> A\n";
+        assert!(is_state_diagram(src));
+        let err = DefaultMermaidRenderer.render(src).unwrap_err();
+        assert!(err.contains("cycles"), "got: {err}");
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn note_body_arrows_are_not_treated_as_transitions() {
+        let src = "stateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> [*]\n    note right of A\n        Mentions A --> A and B --> A\n    end note\n";
+        assert!(!state_diagram_has_cycle(src));
+        let sanitized = sanitize_state_self_loops(
+            "stateDiagram-v2\n    [*] --> A\n    note right of A\n        X --> X\n    end note\n    A --> [*]\n",
+        );
+        assert!(
+            sanitized.is_none(),
+            "note body self-arrow must not be stripped"
+        );
     }
 
     #[cfg(feature = "mermaid")]

@@ -251,6 +251,9 @@ fn run_app(
                     }
                     input::handle_key(&mut state, key);
                     options.render_options.table_mode = state.render_options.table_mode;
+                    if let Some(text) = state.pending_yank.take() {
+                        osc52_copy(&text);
+                    }
                     needs_draw = true;
                     if state.quit {
                         return Ok(());
@@ -496,6 +499,43 @@ fn status_line(state: &PagerState) -> Text<'static> {
 
 fn sanitize_terminal_text(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// Copy `text` to the system clipboard via OSC 52.
+///
+/// Works in most modern terminals (iTerm2, Alacritty, kitty, gnome-terminal,
+/// Windows Terminal, tmux, screen) and over SSH. Silently no-ops if the
+/// terminal doesn't support OSC 52.
+fn osc52_copy(text: &str) {
+    use std::io::Write;
+    let encoded = base64_encode(text.as_bytes());
+    let mut stdout = std::io::stdout();
+    let _ = write!(stdout, "\x1b]52;c;{encoded}\x07");
+    let _ = stdout.flush();
+}
+
+/// Minimal base64 encoder (no external dependency).
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        out.push(TABLE[((b0 & 0x03) << 4 | b1 >> 4) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((b1 & 0x0f) << 2 | b2 >> 6) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(b2 & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }
 
 fn percentage(state: &PagerState) -> u16 {
@@ -772,5 +812,40 @@ mod tests {
             KeyCode::Char('x'),
             KeyModifiers::CONTROL,
         )));
+    }
+
+    #[test]
+    fn base64_encode_empty() {
+        assert_eq!(base64_encode(b""), "");
+    }
+
+    #[test]
+    fn base64_encode_one_byte() {
+        assert_eq!(base64_encode(b"f"), "Zg==");
+    }
+
+    #[test]
+    fn base64_encode_two_bytes() {
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+    }
+
+    #[test]
+    fn base64_encode_three_bytes() {
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+    }
+
+    #[test]
+    fn base64_encode_known_vectors() {
+        assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
+        assert_eq!(base64_encode(b"hello world"), "aGVsbG8gd29ybGQ=");
+        assert_eq!(
+            base64_encode(b"The quick brown fox"),
+            "VGhlIHF1aWNrIGJyb3duIGZveA=="
+        );
+    }
+
+    #[test]
+    fn base64_encode_unicode() {
+        assert_eq!(base64_encode("héllo".as_bytes()), "aMOpbGxv");
     }
 }

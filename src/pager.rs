@@ -14,6 +14,22 @@ use crate::render::{RenderOptions, TableMode};
 use crate::search::{CaseMode, SearchDirection, SearchState, search_lines};
 use crate::source::Input;
 
+/// Max raw bytes queued for OSC 52. Many terminals/tmux cap the encoded
+/// payload near ~100KB; 64KiB raw stays safely under that after base64.
+pub const OSC52_MAX_BYTES: usize = 64 * 1024;
+
+/// Truncate `text` to [`OSC52_MAX_BYTES`] on a char boundary.
+fn truncate_for_osc52(text: &str) -> (String, bool) {
+    if text.len() <= OSC52_MAX_BYTES {
+        return (text.to_owned(), false);
+    }
+    let mut end = OSC52_MAX_BYTES;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (text[..end].to_owned(), true)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -101,6 +117,10 @@ pub struct PagerState {
     pub quit_at_eof: QuitAtEof,
     /// `-q` / `-Q`: suppress the terminal bell (no-op until a bell exists).
     pub quiet: bool,
+    /// Pending text to be copied to the clipboard via OSC 52. Set by
+    /// [`yank_code_block`] / [`yank_document`]; consumed by `main.rs` after
+    /// each key event.
+    pub pending_yank: Option<String>,
     eof_attempts: u8,
 }
 
@@ -160,6 +180,7 @@ impl PagerState {
             status_is_error: false,
             quit_at_eof: QuitAtEof::default(),
             quiet: false,
+            pending_yank: None,
             eof_attempts: 0,
         };
         state.rebuild_visible_indices();
@@ -735,6 +756,58 @@ impl PagerState {
         self.clear_status_message();
     }
 
+    // -- yank / clipboard ----------------------------------------------------
+
+    /// `c`: yank the code block overlapping the current viewport offset.
+    /// Sets [`pending_yank`] so `main.rs` can emit OSC 52. Shows a status
+    /// message describing what was yanked (or why nothing was).
+    pub fn yank_code_block(&mut self) {
+        self.dismiss_status_on_movement();
+        let doc_line = self.visible_indices.get(self.offset).copied();
+        match doc_line {
+            Some(dl) => {
+                if let Some(cb) = self
+                    .doc
+                    .code_blocks
+                    .iter()
+                    .find(|cb| dl >= cb.start_line && dl < cb.end_line)
+                {
+                    let lang = cb.lang.as_deref().unwrap_or("text");
+                    let (text, truncated) = truncate_for_osc52(&cb.source);
+                    let lines = text.lines().count().max(1);
+                    self.pending_yank = Some(text);
+                    if truncated {
+                        self.set_status_message(format!(
+                            "yanked {lang} block truncated to {OSC52_MAX_BYTES} bytes"
+                        ));
+                    } else {
+                        self.set_status_message(format!("yanked {lang} block ({lines} lines)"));
+                    }
+                } else {
+                    self.set_status_message("no code block at cursor");
+                }
+            }
+            None => self.set_status_message("no code block at cursor"),
+        }
+    }
+
+    /// `C`: yank the entire document source (the raw input text). Sets
+    /// [`pending_yank`] so `main.rs` can emit OSC 52. Large documents are
+    /// truncated to [`OSC52_MAX_BYTES`] because many terminals/tmux cap OSC 52.
+    pub fn yank_document(&mut self) {
+        self.dismiss_status_on_movement();
+        let (text, truncated) = truncate_for_osc52(&self.input.text);
+        let lines = text.lines().count().max(1);
+        self.pending_yank = Some(text);
+        if truncated {
+            self.set_status_message(format!(
+                "yanked document truncated to {OSC52_MAX_BYTES} bytes (OSC 52 limit)"
+            ));
+        } else {
+            self.set_status_message(format!("yanked document ({lines} lines)"));
+        }
+    }
+
     // -- digit-prefix count --------------------------------------------------
 
     /// Append a digit (0-9) to the pending command count. Saturates at
@@ -1229,6 +1302,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 0,
         };
@@ -1244,6 +1318,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 2,
         };
@@ -1258,6 +1333,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 0,
         };
@@ -1275,6 +1351,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("clean replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 0,
         };
@@ -2073,5 +2150,25 @@ mod tests {
         s.scroll_up(1);
         s.scroll_down(1);
         assert!(!s.quit);
+    }
+
+    #[test]
+    fn yank_document_truncates_to_osc52_limit() {
+        let big = "x".repeat(OSC52_MAX_BYTES + 100);
+        let mut s = make_state(&big, 24, 80);
+        s.yank_document();
+        let yanked = s.pending_yank.as_ref().unwrap();
+        assert_eq!(yanked.len(), OSC52_MAX_BYTES);
+        assert!(s.status.contains("truncated"));
+        assert!(s.status.contains("OSC 52"));
+    }
+
+    #[test]
+    fn yank_document_keeps_small_payloads_intact() {
+        let mut s = make_state("hello\nworld", 24, 80);
+        s.yank_document();
+        assert_eq!(s.pending_yank.as_deref(), Some("hello\nworld"));
+        assert!(s.status.contains("yanked document"));
+        assert!(!s.status.contains("truncated"));
     }
 }

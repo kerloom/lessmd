@@ -15,6 +15,7 @@ use unicode_width::UnicodeWidthStr;
 use super::mermaid::{DefaultMermaidRenderer, MermaidRenderer};
 use super::text::wrap_line;
 use super::{RenderOptions, RenderOutput, TableMode};
+use crate::document::CodeBlock;
 use crate::document::Heading;
 
 /// Render markdown `text` into a flat list of terminal lines wrapped to `width`.
@@ -121,6 +122,8 @@ struct MdRenderer<'a> {
     pending_heading: Option<HeadingLevel>,
     /// Count of Mermaid blocks that failed to render and fell back to raw.
     mermaid_failures: usize,
+    /// Fenced/indented code blocks captured for yank-to-clipboard.
+    code_blocks: Vec<CodeBlock>,
 }
 
 impl<'a> MdRenderer<'a> {
@@ -147,6 +150,7 @@ impl<'a> MdRenderer<'a> {
             headings: Vec::new(),
             pending_heading: None,
             mermaid_failures: 0,
+            code_blocks: Vec::new(),
         }
     }
 
@@ -154,6 +158,7 @@ impl<'a> MdRenderer<'a> {
         RenderOutput {
             lines: self.out,
             headings: self.headings,
+            code_blocks: self.code_blocks,
             mermaid_failures: self.mermaid_failures,
         }
     }
@@ -577,8 +582,18 @@ impl<'a> MdRenderer<'a> {
     }
 
     fn flush_mermaid_block(&mut self, code: &str) {
+        let start_line = self.out.len();
         match self.mermaid.render(code) {
-            Ok(rendered) => self.push_rendered_mermaid(&rendered),
+            Ok(rendered) => {
+                self.push_rendered_mermaid(&rendered);
+                let end_line = self.out.len();
+                self.code_blocks.push(CodeBlock {
+                    source: code.to_owned(),
+                    lang: Some("mermaid".to_owned()),
+                    start_line,
+                    end_line,
+                });
+            }
             Err(err) => {
                 self.mermaid_failures += 1;
                 self.push_code_block(code, Some("mermaid"));
@@ -588,6 +603,7 @@ impl<'a> MdRenderer<'a> {
     }
 
     fn push_code_block(&mut self, code: &str, lang: Option<&str>) {
+        let start_line = self.out.len();
         let prefix = self.cont_prefix.clone();
         let prefix_w = width_of(&prefix);
         let gutter = "│ ";
@@ -660,6 +676,13 @@ impl<'a> MdRenderer<'a> {
             }
         }
         self.push_code_frame_line(&prefix, "└".to_owned(), pfx_style);
+        let end_line = self.out.len();
+        self.code_blocks.push(CodeBlock {
+            source: code.to_owned(),
+            lang: lang.map(|l| sanitize_terminal_text(l, false)),
+            start_line,
+            end_line,
+        });
     }
 
     fn push_code_frame_line(&mut self, prefix: &str, frame: String, pfx_style: Style) {
@@ -672,13 +695,12 @@ impl<'a> MdRenderer<'a> {
     }
 
     fn push_rendered_mermaid(&mut self, rendered: &str) {
-        let rendered = sanitize_terminal_text(rendered, true);
         let prefix = self.cont_prefix.clone();
         let avail = self.width.saturating_sub(width_of(&prefix)).max(1);
         let pfx_style = self.prefix_style();
         let diagram_style = Style::default().fg(Color::Cyan);
 
-        if rendered.lines().any(|line| width_of(line) > avail) {
+        if rendered.lines().any(|line| visible_width(line) > avail) {
             self.push_mermaid_pan_hint();
         }
 
@@ -690,7 +712,7 @@ impl<'a> MdRenderer<'a> {
             if line.is_empty() {
                 self.out.push(Line::from(spans));
             } else {
-                spans.push(Span::styled(line.to_owned(), diagram_style));
+                spans.extend(ansi_styled_spans(line, diagram_style));
                 self.out.push(Line::from(spans));
             }
         }
@@ -765,6 +787,146 @@ fn sanitize_terminal_text(text: &str, preserve_newlines: bool) -> String {
         }
     }
     out
+}
+
+fn visible_width(text: &str) -> usize {
+    width_of(&plain_without_ansi(text, true))
+}
+
+fn ansi_styled_spans(text: &str, base_style: Style) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut style = base_style;
+    let mut buf = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            let mut code = String::new();
+            for c in chars.by_ref() {
+                if c == 'm' {
+                    break;
+                }
+                if c.is_ascii_digit() || c == ';' {
+                    code.push(c);
+                } else {
+                    code.clear();
+                    break;
+                }
+            }
+            if let Some(new_style) = apply_sgr(&code, style, base_style) {
+                if !buf.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut buf), style));
+                }
+                style = new_style;
+            }
+            continue;
+        }
+
+        match ch {
+            '\t' => buf.push_str("    "),
+            c if !c.is_control() => buf.push(c),
+            _ => {}
+        }
+    }
+
+    if !buf.is_empty() {
+        spans.push(Span::styled(buf, style));
+    }
+    spans
+}
+
+fn plain_without_ansi(text: &str, preserve_newlines: bool) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c in chars.by_ref() {
+                if c == 'm' {
+                    break;
+                }
+                // Match ansi_styled_spans: bail on non-SGR CSI terminators
+                // (e.g. cursor moves ending in H/J) instead of scanning to
+                // the next incidental `m` in the text.
+                if !(c.is_ascii_digit() || c == ';') {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        match ch {
+            '\n' | '\r' if preserve_newlines => out.push(ch),
+            '\t' => out.push_str("    "),
+            c if !c.is_control() => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn apply_sgr(code: &str, mut style: Style, base_style: Style) -> Option<Style> {
+    let codes = if code.is_empty() { "0" } else { code };
+    let mut parts = codes.split(';').filter(|p| !p.is_empty());
+    while let Some(raw) = parts.next() {
+        let sgr = raw.parse::<u8>().ok()?;
+        match sgr {
+            0 => style = base_style,
+            1 => style = style.bold(),
+            22 => style = style.remove_modifier(Modifier::BOLD),
+            30..=37 | 90..=97 => style = style.fg(ansi_color(sgr)?),
+            39 => style.fg = base_style.fg,
+            38 | 48 => {
+                let is_fg = sgr == 38;
+                match parts.next().and_then(|p| p.parse::<u8>().ok()) {
+                    Some(5) => {
+                        let idx = parts.next()?.parse::<u8>().ok()?;
+                        if is_fg {
+                            style = style.fg(Color::Indexed(idx));
+                        } else {
+                            style = style.bg(Color::Indexed(idx));
+                        }
+                    }
+                    Some(2) => {
+                        let r = parts.next()?.parse::<u8>().ok()?;
+                        let g = parts.next()?.parse::<u8>().ok()?;
+                        let b = parts.next()?.parse::<u8>().ok()?;
+                        if is_fg {
+                            style = style.fg(Color::Rgb(r, g, b));
+                        } else {
+                            style = style.bg(Color::Rgb(r, g, b));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(style)
+}
+
+fn ansi_color(code: u8) -> Option<Color> {
+    Some(match code {
+        30 => Color::Black,
+        31 => Color::Red,
+        32 => Color::Green,
+        33 => Color::Yellow,
+        34 => Color::Blue,
+        35 => Color::Magenta,
+        36 => Color::Cyan,
+        37 => Color::Gray,
+        90 => Color::DarkGray,
+        91 => Color::LightRed,
+        92 => Color::LightGreen,
+        93 => Color::LightYellow,
+        94 => Color::LightBlue,
+        95 => Color::LightMagenta,
+        96 => Color::LightCyan,
+        97 => Color::White,
+        _ => return None,
+    })
 }
 
 fn is_mermaid_lang(lang: Option<&str>) -> bool {
@@ -1348,7 +1510,31 @@ mod tests {
         let out = render_markdown_with_mermaid(md, 80, &renderer);
         let text = all_plain(&out.lines);
         assert!(!has_control(&text));
-        assert!(text.contains("safe[31mred"));
+        assert!(text.contains("safered"));
+        assert!(
+            out.lines
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .any(|span| span.content == "red" && span.style.fg == Some(Color::Red))
+        );
+    }
+
+    #[test]
+    fn non_sgr_csi_does_not_swallow_following_text() {
+        // Cursor-position CSI ending in H must not scan ahead to an incidental `m`.
+        let text = "ab\x1b[2;3Hmore";
+        assert_eq!(plain_without_ansi(text, true), "abmore");
+        assert_eq!(visible_width(text), width_of("abmore"));
+    }
+
+    #[test]
+    fn apply_sgr_handles_256_and_truecolor_without_misreading_params() {
+        let base = Style::default().fg(Color::Cyan);
+        // 38;5;31 must not treat trailing 31 as "set red" (SGR 31).
+        let indexed = apply_sgr("38;5;31", base, base).unwrap();
+        assert_eq!(indexed.fg, Some(Color::Indexed(31)));
+        let rgb = apply_sgr("38;2;10;20;30", base, base).unwrap();
+        assert_eq!(rgb.fg, Some(Color::Rgb(10, 20, 30)));
     }
 
     #[test]
@@ -1370,6 +1556,25 @@ mod tests {
         assert!(text.contains("┌─ mermaid"));
         assert!(text.contains("unknownDiagram"));
         assert!(text.contains("mermaid render failed: mock failure"));
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn renders_erdiagram_via_real_figurehead() {
+        let md = "```mermaid\nerDiagram\n    PayGroup {\n        int Id PK\n        varchar Name\n    }\n    PayGroupUserMapping {\n        int Id PK\n        int PayGroupId FK\n    }\n    PayGroup ||--o{ PayGroupUserMapping : \"has users\"\n```";
+        let out = render_markdown(md, 80);
+        assert_eq!(
+            out.mermaid_failures, 0,
+            "expected no mermaid failures, got: {:?}",
+            out.mermaid_failures
+        );
+        let text = all_plain(&out.lines);
+        assert!(text.contains("PayGroup"), "output should contain PayGroup");
+        assert!(
+            text.contains("PayGroupUserMapping"),
+            "output should contain PayGroupUserMapping"
+        );
+        assert!(!text.contains("mermaid render failed"));
     }
 
     #[test]
@@ -1641,5 +1846,74 @@ mod tests {
 
     fn leading_spaces(s: &str) -> usize {
         s.chars().take_while(|c| *c == ' ').count()
+    }
+
+    // -- code block tracking for yank ---------------------------------------
+
+    fn render_with_code_blocks(md: &str) -> RenderOutput {
+        render_markdown(md, 80)
+    }
+
+    #[test]
+    fn code_block_tracked_with_source_and_lang() {
+        let out = render_with_code_blocks("```rust\nfn main() {}\n```");
+        assert_eq!(out.code_blocks.len(), 1);
+        let cb = &out.code_blocks[0];
+        assert_eq!(cb.source, "fn main() {}\n");
+        assert_eq!(cb.lang.as_deref(), Some("rust"));
+        // start_line points to the ┌ frame, end_line after └
+        assert!(cb.end_line > cb.start_line);
+        let frame_top = plain(&out.lines[cb.start_line]);
+        assert!(frame_top.starts_with('┌'));
+        let frame_bot = plain(&out.lines[cb.end_line - 1]);
+        assert!(frame_bot.starts_with('└'));
+    }
+
+    #[test]
+    fn indented_code_block_tracked_without_lang() {
+        let out = render_with_code_blocks("    let x = 1;");
+        assert_eq!(out.code_blocks.len(), 1);
+        let cb = &out.code_blocks[0];
+        assert_eq!(cb.source, "let x = 1;");
+        assert!(cb.lang.is_none());
+    }
+
+    #[test]
+    fn multiple_code_blocks_tracked_independently() {
+        let md = "```python\na = 1\n```\n\ntext\n\n```js\nb()\n```";
+        let out = render_with_code_blocks(md);
+        assert_eq!(out.code_blocks.len(), 2);
+        assert_eq!(out.code_blocks[0].source, "a = 1\n");
+        assert_eq!(out.code_blocks[0].lang.as_deref(), Some("python"));
+        assert_eq!(out.code_blocks[1].source, "b()\n");
+        assert_eq!(out.code_blocks[1].lang.as_deref(), Some("js"));
+        // Blocks don't overlap.
+        assert!(out.code_blocks[0].end_line <= out.code_blocks[1].start_line);
+    }
+
+    #[test]
+    fn code_block_source_excludes_decorations() {
+        let out = render_with_code_blocks("```rust\nfn main() {}\n```");
+        let cb = &out.code_blocks[0];
+        assert!(!cb.source.contains('│'));
+        assert!(!cb.source.contains('┌'));
+        assert!(!cb.source.contains('└'));
+        assert!(!cb.source.contains("rust"));
+    }
+
+    #[test]
+    fn mermaid_block_source_tracked_on_success() {
+        let md = "```mermaid\ngraph LR\nA-->B\n```";
+        let out = render_markdown_with_mermaid(md, 80, &OkMermaidRenderer);
+        assert_eq!(out.code_blocks.len(), 1);
+        let cb = &out.code_blocks[0];
+        assert_eq!(cb.lang.as_deref(), Some("mermaid"));
+        assert!(cb.source.contains("A-->B"));
+    }
+
+    #[test]
+    fn no_code_blocks_in_plain_markdown() {
+        let out = render_with_code_blocks("# Title\n\nparagraph text\n\n- list\n- items");
+        assert!(out.code_blocks.is_empty());
     }
 }

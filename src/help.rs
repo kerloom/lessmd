@@ -12,7 +12,7 @@ pub fn help_text() -> Text<'static> {
     ));
     let mut lines: Vec<Line<'static>> = vec![title, Line::raw("")];
 
-    let entries: [(&str, &str); 26] = [
+    let entries: [(&str, &str); 28] = [
         ("j / e / Down", "scroll down N lines (1 if no count)"),
         ("k / y / Up", "scroll up N lines (1 if no count)"),
         ("h / <-", "pan left N columns (8 if no count)"),
@@ -29,6 +29,8 @@ pub fn help_text() -> Text<'static> {
         ("o", "toggle (o)utline (jump to heading)"),
         ("Tab", "toggle fold on heading"),
         ("w", "toggle table truncate/expand (w)idth"),
+        ("c", "yank code block at cursor to clipboard"),
+        ("C", "yank whole document source to clipboard"),
         ("/", "start search (preceded by N = Nth match)"),
         ("?", "start backward search"),
         ("n", "next match"),
@@ -77,5 +79,12 @@ mod tests {
         assert!(text.contains("Tab"));
         assert!(text.contains("toggle fold"));
         assert!(text.contains("toggle table truncate/expand (w)idth"));
+    }
+
+    #[test]
+    fn help_lists_yank_keys() {
+        let text = plain(&help_text());
+        assert!(text.contains("yank code block"));
+        assert!(text.contains("yank whole document"));
     }
 }
