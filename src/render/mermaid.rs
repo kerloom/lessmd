@@ -56,7 +56,7 @@ const STATE_RENDER_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[cfg(feature = "mermaid")]
 fn render_timeout_for(source: &str) -> Duration {
-    if source.trim_start().starts_with("stateDiagram") {
+    if is_state_diagram(source) {
         STATE_RENDER_TIMEOUT
     } else {
         RENDER_TIMEOUT
@@ -100,10 +100,28 @@ where
     }
 }
 
+/// True when the first non-empty, non-`%%` line starts with `stateDiagram`.
+#[cfg(feature = "mermaid")]
+fn is_state_diagram(source: &str) -> bool {
+    mermaid_body_starts_with(source, "stateDiagram")
+}
+
+#[cfg(feature = "mermaid")]
+fn mermaid_body_starts_with(source: &str, prefix: &str) -> bool {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("%%") {
+            continue;
+        }
+        return trimmed.starts_with(prefix);
+    }
+    false
+}
+
 /// Strip state self-loops and refuse cyclic graphs (figurehead hangs / OOMs).
 #[cfg(feature = "mermaid")]
 fn prepare_mermaid_source(source: &str) -> Result<String, String> {
-    if !source.trim_start().starts_with("stateDiagram") {
+    if !is_state_diagram(source) {
         return Ok(source.to_owned());
     }
     let sanitized = sanitize_state_self_loops(source).unwrap_or_else(|| source.to_owned());
@@ -192,7 +210,7 @@ fn render_with_figurehead(source: &str) -> Result<String, String> {
 
 #[cfg(feature = "mermaid")]
 fn sanitize_sequence(source: &str) -> Option<String> {
-    if !source.trim_start().starts_with("sequenceDiagram") {
+    if !mermaid_body_starts_with(source, "sequenceDiagram") {
         return None;
     }
 
@@ -212,18 +230,34 @@ fn sanitize_sequence(source: &str) -> Option<String> {
     changed.then_some(out)
 }
 
-/// Drop `A --> A` / `A --> A: label` lines. Figurehead's state layout hangs on
-/// self-transitions; stripping them lets the rest of the diagram render.
+/// Drop `A --> A` / `A --> A: label` lines outside note blocks. Figurehead's
+/// state layout hangs on self-transitions; stripping them lets the rest render.
 #[cfg(feature = "mermaid")]
 fn sanitize_state_self_loops(source: &str) -> Option<String> {
-    if !source.trim_start().starts_with("stateDiagram") {
+    if !is_state_diagram(source) {
         return None;
     }
 
     let mut changed = false;
+    let mut in_note = false;
     let mut out = String::new();
     for line in source.lines() {
-        if is_state_self_transition(line.trim()) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("note ") {
+            // Single-line `note ...: text` has no body; multi-line notes continue
+            // until `end note`.
+            in_note = !trimmed.contains(':');
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if trimmed == "end note" {
+            in_note = false;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if !in_note && is_state_self_transition(trimmed) {
             changed = true;
             continue;
         }
@@ -287,9 +321,18 @@ fn state_diagram_has_cycle(source: &str) -> bool {
     use std::collections::HashMap;
 
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut in_note = false;
     for line in source.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("note ") || trimmed == "end note" {
+        if trimmed.starts_with("note ") {
+            in_note = !trimmed.contains(':');
+            continue;
+        }
+        if trimmed == "end note" {
+            in_note = false;
+            continue;
+        }
+        if in_note {
             continue;
         }
         if let Some((from, to)) = parse_state_edge(trimmed) {
@@ -299,35 +342,32 @@ fn state_diagram_has_cycle(source: &str) -> bool {
         }
     }
 
-    // 0 = unvisited, 1 = on stack, 2 = done
+    // Iterative DFS: 0 = unvisited, 1 = on stack, 2 = done.
     let mut color: HashMap<&str, u8> = HashMap::new();
-    fn dfs<'a>(
-        node: &'a str,
-        adj: &HashMap<&'a str, Vec<&'a str>>,
-        color: &mut HashMap<&'a str, u8>,
-    ) -> bool {
-        color.insert(node, 1);
-        if let Some(nexts) = adj.get(node) {
-            for &next in nexts {
+    let nodes: Vec<&str> = adj.keys().copied().collect();
+    for start in nodes {
+        if color.get(start).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+        let mut stack = vec![(start, 0usize)];
+        color.insert(start, 1);
+        while let Some(&(node, idx)) = stack.last() {
+            let nexts = adj.get(node).map(Vec::as_slice).unwrap_or(&[]);
+            if idx < nexts.len() {
+                let next = nexts[idx];
+                stack.last_mut().unwrap().1 = idx + 1;
                 match color.get(next).copied().unwrap_or(0) {
                     1 => return true,
                     2 => {}
                     _ => {
-                        if dfs(next, adj, color) {
-                            return true;
-                        }
+                        color.insert(next, 1);
+                        stack.push((next, 0));
                     }
                 }
+            } else {
+                color.insert(node, 2);
+                stack.pop();
             }
-        }
-        color.insert(node, 2);
-        false
-    }
-
-    let nodes: Vec<&str> = adj.keys().copied().collect();
-    for node in nodes {
-        if color.get(node).copied().unwrap_or(0) == 0 && dfs(node, &adj, &mut color) {
-            return true;
         }
     }
     false
@@ -508,6 +548,29 @@ mod tests {
         assert!(!state_diagram_has_cycle(
             "stateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> [*]\n"
         ));
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn leading_mermaid_comments_still_detect_state_cycles() {
+        let src = "%% comment\n%%{init: {'theme': 'dark'}}%%\nstateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> A\n";
+        assert!(is_state_diagram(src));
+        let err = DefaultMermaidRenderer.render(src).unwrap_err();
+        assert!(err.contains("cycles"), "got: {err}");
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn note_body_arrows_are_not_treated_as_transitions() {
+        let src = "stateDiagram-v2\n    [*] --> A\n    A --> B\n    B --> [*]\n    note right of A\n        Mentions A --> A and B --> A\n    end note\n";
+        assert!(!state_diagram_has_cycle(src));
+        let sanitized = sanitize_state_self_loops(
+            "stateDiagram-v2\n    [*] --> A\n    note right of A\n        X --> X\n    end note\n    A --> [*]\n",
+        );
+        assert!(
+            sanitized.is_none(),
+            "note body self-arrow must not be stripped"
+        );
     }
 
     #[cfg(feature = "mermaid")]

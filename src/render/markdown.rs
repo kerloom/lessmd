@@ -846,6 +846,12 @@ fn plain_without_ansi(text: &str, preserve_newlines: bool) -> String {
                 if c == 'm' {
                     break;
                 }
+                // Match ansi_styled_spans: bail on non-SGR CSI terminators
+                // (e.g. cursor moves ending in H/J) instead of scanning to
+                // the next incidental `m` in the text.
+                if !(c.is_ascii_digit() || c == ';') {
+                    break;
+                }
             }
             continue;
         }
@@ -862,7 +868,8 @@ fn plain_without_ansi(text: &str, preserve_newlines: bool) -> String {
 
 fn apply_sgr(code: &str, mut style: Style, base_style: Style) -> Option<Style> {
     let codes = if code.is_empty() { "0" } else { code };
-    for raw in codes.split(';') {
+    let mut parts = codes.split(';').filter(|p| !p.is_empty());
+    while let Some(raw) = parts.next() {
         let sgr = raw.parse::<u8>().ok()?;
         match sgr {
             0 => style = base_style,
@@ -870,6 +877,30 @@ fn apply_sgr(code: &str, mut style: Style, base_style: Style) -> Option<Style> {
             22 => style = style.remove_modifier(Modifier::BOLD),
             30..=37 | 90..=97 => style = style.fg(ansi_color(sgr)?),
             39 => style.fg = base_style.fg,
+            38 | 48 => {
+                let is_fg = sgr == 38;
+                match parts.next().and_then(|p| p.parse::<u8>().ok()) {
+                    Some(5) => {
+                        let idx = parts.next()?.parse::<u8>().ok()?;
+                        if is_fg {
+                            style = style.fg(Color::Indexed(idx));
+                        } else {
+                            style = style.bg(Color::Indexed(idx));
+                        }
+                    }
+                    Some(2) => {
+                        let r = parts.next()?.parse::<u8>().ok()?;
+                        let g = parts.next()?.parse::<u8>().ok()?;
+                        let b = parts.next()?.parse::<u8>().ok()?;
+                        if is_fg {
+                            style = style.fg(Color::Rgb(r, g, b));
+                        } else {
+                            style = style.bg(Color::Rgb(r, g, b));
+                        }
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }
@@ -1486,6 +1517,24 @@ mod tests {
                 .flat_map(|line| line.spans.iter())
                 .any(|span| span.content == "red" && span.style.fg == Some(Color::Red))
         );
+    }
+
+    #[test]
+    fn non_sgr_csi_does_not_swallow_following_text() {
+        // Cursor-position CSI ending in H must not scan ahead to an incidental `m`.
+        let text = "ab\x1b[2;3Hmore";
+        assert_eq!(plain_without_ansi(text, true), "abmore");
+        assert_eq!(visible_width(text), width_of("abmore"));
+    }
+
+    #[test]
+    fn apply_sgr_handles_256_and_truecolor_without_misreading_params() {
+        let base = Style::default().fg(Color::Cyan);
+        // 38;5;31 must not treat trailing 31 as "set red" (SGR 31).
+        let indexed = apply_sgr("38;5;31", base, base).unwrap();
+        assert_eq!(indexed.fg, Some(Color::Indexed(31)));
+        let rgb = apply_sgr("38;2;10;20;30", base, base).unwrap();
+        assert_eq!(rgb.fg, Some(Color::Rgb(10, 20, 30)));
     }
 
     #[test]

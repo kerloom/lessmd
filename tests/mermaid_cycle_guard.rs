@@ -5,8 +5,8 @@ use lessmd::render::markdown::render_markdown;
 use lessmd::render::mermaid::clear_cache;
 
 #[test]
-fn worldlink_diagrams_do_not_block_document_rendering() {
-    let source = include_str!("fixtures/worldlink_diagrams.md");
+fn cyclic_state_diagram_does_not_block_document_rendering() {
+    let source = include_str!("fixtures/mermaid_cycle_guard.md");
     #[cfg(feature = "mermaid")]
     clear_cache();
 
