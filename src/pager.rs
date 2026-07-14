@@ -101,6 +101,10 @@ pub struct PagerState {
     pub quit_at_eof: QuitAtEof,
     /// `-q` / `-Q`: suppress the terminal bell (no-op until a bell exists).
     pub quiet: bool,
+    /// Pending text to be copied to the clipboard via OSC 52. Set by
+    /// [`yank_code_block`] / [`yank_document`]; consumed by `main.rs` after
+    /// each key event.
+    pub pending_yank: Option<String>,
     eof_attempts: u8,
 }
 
@@ -160,6 +164,7 @@ impl PagerState {
             status_is_error: false,
             quit_at_eof: QuitAtEof::default(),
             quiet: false,
+            pending_yank: None,
             eof_attempts: 0,
         };
         state.rebuild_visible_indices();
@@ -735,6 +740,43 @@ impl PagerState {
         self.clear_status_message();
     }
 
+    // -- yank / clipboard ----------------------------------------------------
+
+    /// `c`: yank the code block overlapping the current viewport offset.
+    /// Sets [`pending_yank`] so `main.rs` can emit OSC 52. Shows a status
+    /// message describing what was yanked (or why nothing was).
+    pub fn yank_code_block(&mut self) {
+        self.dismiss_status_on_movement();
+        let doc_line = self.visible_indices.get(self.offset).copied();
+        match doc_line {
+            Some(dl) => {
+                if let Some(cb) = self
+                    .doc
+                    .code_blocks
+                    .iter()
+                    .find(|cb| dl >= cb.start_line && dl < cb.end_line)
+                {
+                    let lang = cb.lang.as_deref().unwrap_or("text");
+                    let lines = cb.source.lines().count().max(1);
+                    self.pending_yank = Some(cb.source.clone());
+                    self.set_status_message(format!("yanked {lang} block ({lines} lines)"));
+                } else {
+                    self.set_status_message("no code block at cursor");
+                }
+            }
+            None => self.set_status_message("no code block at cursor"),
+        }
+    }
+
+    /// `C`: yank the entire document source (the raw input text). Sets
+    /// [`pending_yank`] so `main.rs` can emit OSC 52.
+    pub fn yank_document(&mut self) {
+        self.dismiss_status_on_movement();
+        let lines = self.input.text.lines().count().max(1);
+        self.pending_yank = Some(self.input.text.clone());
+        self.set_status_message(format!("yanked document ({lines} lines)"));
+    }
+
     // -- digit-prefix count --------------------------------------------------
 
     /// Append a digit (0-9) to the pending command count. Saturates at
@@ -1229,6 +1271,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 0,
         };
@@ -1244,6 +1287,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 2,
         };
@@ -1258,6 +1302,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 0,
         };
@@ -1275,6 +1320,7 @@ mod tests {
         let doc = Document {
             lines: vec![Line::raw("clean replacement")],
             headings: Vec::new(),
+            code_blocks: Vec::new(),
             source_path: None,
             mermaid_failures: 0,
         };

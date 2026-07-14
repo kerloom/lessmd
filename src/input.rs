@@ -101,6 +101,9 @@ pub fn handle_key(state: &mut PagerState, key: KeyEvent) {
         KeyCode::Tab => state.toggle_fold(),
         // table layout
         KeyCode::Char('w') => state.toggle_table_mode(),
+        // yank / clipboard (OSC 52 via main.rs)
+        KeyCode::Char('c') => state.yank_code_block(),
+        KeyCode::Char('C') => state.yank_document(),
         // search
         KeyCode::Char('/') => state.start_search(),
         KeyCode::Char('?') => state.start_backward_search(),
@@ -596,5 +599,66 @@ mod tests {
         handle_key(&mut s, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let search = s.search.as_ref().unwrap();
         assert_eq!(search.current, 1);
+    }
+
+    // -- yank / clipboard tests ---------------------------------------------
+
+    fn md_state_with_code(md: &str) -> PagerState {
+        PagerState::new(
+            Input {
+                text: md.to_owned(),
+                render_mode: ResolvedMode::Markdown,
+                source_path: None,
+            },
+            24,
+            80,
+            false,
+        )
+    }
+
+    #[test]
+    fn c_yanks_code_block_at_cursor() {
+        let mut s = md_state_with_code("```rust\nfn main() {}\n```");
+        // Cursor is on the ┌ frame line (line 0) — inside the block range.
+        handle_key(&mut s, key('c'));
+        assert_eq!(s.pending_yank.as_deref(), Some("fn main() {}\n"));
+        assert!(s.status.contains("rust"));
+        assert!(s.status.contains("yanked"));
+    }
+
+    #[test]
+    fn c_on_code_body_line_yanks_block() {
+        let mut s = md_state_with_code("```rust\nfn main() {}\n```");
+        s.scroll_down(1); // move to the code body line
+        handle_key(&mut s, key('c'));
+        assert_eq!(s.pending_yank.as_deref(), Some("fn main() {}\n"));
+    }
+
+    #[test]
+    fn c_without_code_block_shows_message() {
+        let mut s = md_state_with_code("# Title\n\nno code here");
+        handle_key(&mut s, key('c'));
+        assert!(s.pending_yank.is_none());
+        assert!(s.status.contains("no code block"));
+    }
+
+    #[test]
+    fn capital_c_yanks_whole_document() {
+        let md = "# Title\n\nparagraph\n\n```rust\nx\n```";
+        let mut s = md_state_with_code(md);
+        handle_key(&mut s, key('C'));
+        assert_eq!(s.pending_yank.as_deref(), Some(md));
+        assert!(s.status.contains("document"));
+    }
+
+    #[test]
+    fn ctrl_c_still_quits_not_yanks() {
+        let mut s = state("hello");
+        handle_key(
+            &mut s,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+        assert!(s.quit);
+        assert!(s.pending_yank.is_none());
     }
 }

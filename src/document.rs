@@ -20,10 +20,28 @@ pub struct Heading {
     pub line: usize,
 }
 
+/// A fenced code block captured during rendering, used for yank-to-clipboard.
+/// Stores the raw source (no decorations) and the rendered line range so the
+/// pager can find the block under the cursor.
+#[derive(Debug, Clone)]
+pub struct CodeBlock {
+    /// Raw source code exactly as it appeared in the markdown (no fence, no
+    /// language tag, no frame/gutter decorations).
+    pub source: String,
+    /// Language tag from the fence (e.g. `Some("rust")`), or `None` for
+    /// indented code blocks.
+    pub lang: Option<String>,
+    /// Index of the first rendered line (the `┌─` frame line).
+    pub start_line: usize,
+    /// One past the last rendered line (after the `└` frame line).
+    pub end_line: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Document {
     pub lines: Vec<Line<'static>>,
     pub headings: Vec<Heading>,
+    pub code_blocks: Vec<CodeBlock>,
     pub source_path: Option<PathBuf>,
     /// Number of Mermaid diagrams that failed to render and fell back to raw.
     pub mermaid_failures: usize,
@@ -40,6 +58,7 @@ impl Document {
         Self {
             lines: output.lines,
             headings: output.headings,
+            code_blocks: output.code_blocks,
             source_path: input.source_path.clone(),
             mermaid_failures: output.mermaid_failures,
         }

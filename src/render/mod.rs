@@ -3,7 +3,7 @@
 
 use ratatui::text::Line;
 
-use crate::document::Heading;
+use crate::document::{CodeBlock, Heading};
 use crate::source::{Input, ResolvedMode};
 
 pub mod markdown;
@@ -41,6 +41,7 @@ impl Default for RenderOptions {
 pub struct RenderOutput {
     pub lines: Vec<Line<'static>>,
     pub headings: Vec<Heading>,
+    pub code_blocks: Vec<CodeBlock>,
     /// Mermaid diagrams that failed to render and fell back to raw source.
     pub mermaid_failures: usize,
 }
