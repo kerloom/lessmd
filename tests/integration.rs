@@ -32,7 +32,13 @@ fn plain_text_renders_line_count_and_content() {
 fn plain_fixture_renders() {
     let path = std::path::Path::new("tests/fixtures/plain.txt");
     let input = read(Some(path), RenderMode::Auto).unwrap();
-    assert_eq!(input.render_mode, ResolvedMode::Text { ansi: true });
+    assert_eq!(
+        input.render_mode,
+        ResolvedMode::Text {
+            ansi: true,
+            lang: Some("txt".into()),
+        }
+    );
     let doc = Document::new(&input, 200);
     assert_eq!(doc.line_count(), 6);
     assert_eq!(plain(&doc.lines[0]), "The quick brown fox");
@@ -52,7 +58,74 @@ fn plain_fixture_wraps_when_narrow() {
 fn plain_flag_strips_ansi_and_forces_text() {
     let path = std::path::Path::new("tests/fixtures/plain.txt");
     let input = read(Some(path), RenderMode::Plain).unwrap();
-    assert_eq!(input.render_mode, ResolvedMode::Text { ansi: false });
+    assert_eq!(
+        input.render_mode,
+        ResolvedMode::Text {
+            ansi: false,
+            lang: None,
+        }
+    );
+}
+
+#[cfg(feature = "syntax")]
+#[test]
+fn source_file_py_is_syntax_highlighted() {
+    let path = std::path::Path::new("tests/fixtures/sample.py");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    assert_eq!(
+        input.render_mode,
+        ResolvedMode::Text {
+            ansi: true,
+            lang: Some("py".into()),
+        }
+    );
+    let doc = Document::new(&input, 200);
+    let text = all_text(&doc.lines);
+    assert!(text.contains("def greet"));
+    assert!(text.contains("print"));
+    let has_color = doc
+        .lines
+        .iter()
+        .any(|l| l.spans.iter().any(|s| s.style.fg.is_some()));
+    assert!(has_color, "expected syntax colors for .py source file");
+}
+
+#[cfg(feature = "syntax")]
+#[test]
+fn source_file_no_syntax_flag_stays_plain() {
+    use lessmd::render::RenderOptions;
+
+    let path = std::path::Path::new("tests/fixtures/sample.py");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    let doc = Document::new_with_options(
+        &input,
+        200,
+        RenderOptions {
+            syntax: false,
+            ..RenderOptions::default()
+        },
+    );
+    assert!(all_text(&doc.lines).contains("def greet"));
+    assert!(
+        doc.lines
+            .iter()
+            .all(|l| l.spans.iter().all(|s| s.style.fg.is_none())),
+        "expected no syntax colors when syntax is disabled"
+    );
+}
+
+#[cfg(feature = "syntax")]
+#[test]
+fn source_file_plain_mode_skips_lang() {
+    let path = std::path::Path::new("tests/fixtures/sample.py");
+    let input = read(Some(path), RenderMode::Plain).unwrap();
+    assert_eq!(
+        input.render_mode,
+        ResolvedMode::Text {
+            ansi: false,
+            lang: None,
+        }
+    );
 }
 
 // --- markdown (M2) ---------------------------------------------------------

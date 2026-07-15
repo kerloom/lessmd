@@ -53,8 +53,14 @@ pub fn render(input: &Input, width: u16) -> RenderOutput {
 }
 
 pub fn render_with_options(input: &Input, width: u16, options: RenderOptions) -> RenderOutput {
-    match input.render_mode {
-        ResolvedMode::Text { ansi } => text::render_text(&input.text, width, ansi),
+    match &input.render_mode {
+        ResolvedMode::Text { ansi, lang } => text::render_text_with_options(
+            &input.text,
+            width,
+            *ansi,
+            lang.as_deref(),
+            options.syntax,
+        ),
         ResolvedMode::Markdown => {
             markdown::render_markdown_with_options(&input.text, width, options)
         }

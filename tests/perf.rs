@@ -49,7 +49,10 @@ use lessmd::source::{Input, ResolvedMode};
 fn text_input(text: &str) -> Input {
     Input {
         text: text.to_owned(),
-        render_mode: ResolvedMode::Text { ansi: false },
+        render_mode: ResolvedMode::Text {
+            ansi: false,
+            lang: None,
+        },
         source_path: None,
     }
 }

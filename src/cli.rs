@@ -79,7 +79,7 @@ Usage:
 Options:
   --markdown        Force markdown rendering (ignore file extension).
   --plain           Force plain-text rendering and strip ANSI colors.
-  --no-syntax       Disable fenced code syntax highlighting.
+  --no-syntax       Disable syntax highlighting (fenced code and source files).
   --no-mermaid      Disable inline Mermaid rendering.
   --expand-tables   Render tables at natural width for horizontal panning.
   --truncate-tables Truncate tables to fit the viewport (default).
