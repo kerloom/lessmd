@@ -15,7 +15,7 @@ ratatui = "0.30.2"
 crossterm = "0.29.0"
 unicode-width = "0.2"
 pulldown-cmark = "0.13"
-figurehead = { git = "https://github.com/kerloom/figurehead-rs", branch = "master", optional = true, features = ["sequence", "class"] }
+figurehead = { git = "https://github.com/kerloom/figurehead-rs", branch = "master", optional = true, features = ["sequence", "class", "state"] }
 syntect = { version = "5.3", optional = true, default-features = false, features = ["parsing", "default-syntaxes", "default-themes", "dump-load", "regex-fancy"] }
 
 [profile.release]

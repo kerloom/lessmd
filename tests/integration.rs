@@ -228,3 +228,25 @@ fn markdown_mermaid_fixture_renders_with_feature() {
     assert!(text.contains("this is invalid mermaid"));
     assert!(text.contains("mermaid render failed:"));
 }
+
+#[cfg(feature = "mermaid")]
+#[test]
+fn markdown_state_diagrams_render_cycles_choices_and_notes() {
+    let path = std::path::Path::new("tests/fixtures/state-diagrams.md");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    let doc = Document::new(&input, 240);
+    let text = all_text(&doc.lines);
+
+    for expected in [
+        "ManualRetryRequired",
+        "Retry fails again",
+        "Authorize -> Book FX -> Send",
+        "Original failure row is preserved",
+        "Waiting for payment",
+        "Validate currency and amount",
+        "still incomplete",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?}:\n{text}");
+    }
+    assert!(!text.contains("mermaid render failed:"));
+}

@@ -22,8 +22,8 @@ fn cyclic_state_diagram_does_not_block_document_rendering() {
 
     #[cfg(feature = "mermaid")]
     assert_eq!(
-        output.mermaid_failures, 1,
-        "expected only the cyclic state diagram to fail, got {}",
+        output.mermaid_failures, 0,
+        "expected the cyclic state diagram to render, got {} failures",
         output.mermaid_failures
     );
 

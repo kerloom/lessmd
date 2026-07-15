@@ -119,6 +119,7 @@ cargo test --features mermaid      # once phase 2 lands
 
 ## Session Tracker
 
+- 2026-07-15: Integrated merged `figurehead` state-diagram support for cyclic and self transitions, notes, state descriptions, choices/forks/joins, and wrapped transition labels. Enabled the GitHub dependency's `state` feature, removed state cycle sanitization/refusal, and added simple and complex end-to-end fixtures. Refined the renderer layout to protect boxes, reduce spacing, and close self-loop routes after their labels. Verified renderer fmt/clippy/tests and lessmd release build, fmt, clippy, and tests with default and no-default features.
 - 2026-06-21: Improved Markdown aesthetics: H1/H2 separators, no heading-level indentation, inline code backticks, framed code blocks. Added table render mode (`truncate` default, `expand` for horizontal panning) with `--expand-tables`, `--truncate-tables`, and runtime `w` toggle. Verified with fmt, clippy (default and no-default-features), and tests (default and no-default-features).
 
 ---
