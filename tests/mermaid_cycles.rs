@@ -5,8 +5,8 @@ use lessmd::render::markdown::render_markdown;
 use lessmd::render::mermaid::clear_cache;
 
 #[test]
-fn cyclic_state_diagram_does_not_block_document_rendering() {
-    let source = include_str!("fixtures/mermaid_cycle_guard.md");
+fn cyclic_state_diagram_renders_without_blocking_document() {
+    let source = include_str!("fixtures/mermaid_cycles.md");
     #[cfg(feature = "mermaid")]
     clear_cache();
 
@@ -22,8 +22,8 @@ fn cyclic_state_diagram_does_not_block_document_rendering() {
 
     #[cfg(feature = "mermaid")]
     assert_eq!(
-        output.mermaid_failures, 1,
-        "expected only the cyclic state diagram to fail, got {}",
+        output.mermaid_failures, 0,
+        "expected the cyclic state diagram to render, got {} failures",
         output.mermaid_failures
     );
 

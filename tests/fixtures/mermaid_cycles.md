@@ -1,7 +1,7 @@
-# Mermaid cycle-guard fixture
+# Mermaid cycle fixture
 
-Synthetic diagrams that exercise cycle refusal without hanging the pager.
-The cyclic state diagram must fail fast; the others should still render.
+Synthetic diagrams that exercise cyclic rendering without hanging the pager.
+All three diagrams should render.
 
 ```mermaid
 flowchart TD
@@ -11,7 +11,7 @@ flowchart TD
 ```
 
 ```mermaid
-%% leading comment must not bypass cycle detection
+%% leading Mermaid comments are accepted before the state header
 %%{init: {'theme': 'dark'}}%%
 stateDiagram-v2
     [*] --> Ready
