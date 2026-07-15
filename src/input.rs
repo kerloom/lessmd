@@ -174,7 +174,10 @@ mod tests {
         PagerState::new(
             Input {
                 text: text.to_owned(),
-                render_mode: ResolvedMode::Text { ansi: false },
+                render_mode: ResolvedMode::Text {
+                    ansi: false,
+                    lang: None,
+                },
                 source_path: None,
             },
             24,

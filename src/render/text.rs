@@ -15,7 +15,40 @@ use super::RenderOutput;
 /// ratatui styles; other escape sequences (OSC, bare ESC) are stripped.
 /// When `ansi` is false, all escape sequences are stripped.
 pub fn render_text(text: &str, width: u16, ansi: bool) -> RenderOutput {
+    render_text_with_options(text, width, ansi, None, false)
+}
+
+/// Like [`render_text`], but optionally syntax-highlights the whole file when
+/// `syntax` is true and `lang` is a recognized language token/extension.
+pub fn render_text_with_options(
+    text: &str,
+    width: u16,
+    ansi: bool,
+    lang: Option<&str>,
+    syntax: bool,
+) -> RenderOutput {
     let width = width.max(1) as usize;
+
+    #[cfg(feature = "syntax")]
+    if syntax
+        && let Some(lang) = lang
+        && let Some(hl_lines) = super::syntax::highlight_code(text, lang)
+    {
+        let lines: Vec<Line<'static>> = hl_lines
+            .into_iter()
+            .flat_map(|line| wrap_line(&line, width))
+            .collect();
+        return RenderOutput {
+            lines,
+            headings: Vec::new(),
+            code_blocks: Vec::new(),
+            mermaid_failures: 0,
+        };
+    }
+
+    #[cfg(not(feature = "syntax"))]
+    let _ = (lang, syntax);
+
     let lines: Vec<Line<'static>> = text
         .lines()
         .flat_map(|raw| {
@@ -415,5 +448,41 @@ mod tests {
         let lines = render_text("e\u{0301}", 1, false).lines;
         assert_eq!(lines.len(), 1);
         assert_eq!(plain(&lines[0]), "e\u{0301}");
+    }
+
+    #[cfg(feature = "syntax")]
+    #[test]
+    fn syntax_highlights_source_when_lang_known() {
+        let out = render_text_with_options("fn main() {}", 80, true, Some("rs"), true);
+        assert_eq!(out.lines.len(), 1);
+        assert!(plain(&out.lines[0]).contains("fn"));
+        let has_color = out.lines[0].spans.iter().any(|s| s.style.fg.is_some());
+        assert!(has_color, "expected colored spans for Rust source");
+    }
+
+    #[cfg(feature = "syntax")]
+    #[test]
+    fn syntax_disabled_falls_back_to_plain() {
+        let out = render_text_with_options("fn main() {}", 80, true, Some("rs"), false);
+        assert_eq!(plain(&out.lines[0]), "fn main() {}");
+        assert!(out.lines[0].spans.iter().all(|s| s.style.fg.is_none()));
+    }
+
+    #[cfg(feature = "syntax")]
+    #[test]
+    fn unknown_lang_falls_back_to_plain() {
+        let out = render_text_with_options("hello", 80, true, Some("xyzzy"), true);
+        assert_eq!(plain(&out.lines[0]), "hello");
+    }
+
+    #[cfg(feature = "syntax")]
+    #[test]
+    fn syntax_highlight_wraps_long_lines() {
+        let code = "fn main() { let x = 1; let y = 2; let z = 3; }";
+        let out = render_text_with_options(code, 20, true, Some("rs"), true);
+        assert!(out.lines.len() > 1);
+        let text: String = out.lines.iter().map(plain).collect();
+        assert!(text.contains("fn main"));
+        assert!(text.contains("let z"));
     }
 }

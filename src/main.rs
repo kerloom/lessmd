@@ -333,7 +333,14 @@ fn spawn_background_render(enhanced_tx: mpsc::Sender<EnhancedMsg>, job: Backgrou
 }
 
 fn initial_render_options(input: &source::Input, requested: RenderOptions) -> RenderOptions {
-    if input.render_mode == ResolvedMode::Markdown && (requested.syntax || requested.mermaid) {
+    let wants_deferred_syntax = requested.syntax
+        && matches!(
+            &input.render_mode,
+            ResolvedMode::Markdown | ResolvedMode::Text { lang: Some(_), .. }
+        );
+    let wants_deferred_mermaid =
+        requested.mermaid && matches!(input.render_mode, ResolvedMode::Markdown);
+    if wants_deferred_syntax || wants_deferred_mermaid {
         RenderOptions {
             syntax: false,
             mermaid: false,
@@ -698,8 +705,37 @@ mod tests {
             table_mode: lessmd::render::TableMode::Truncate,
         };
         assert_eq!(
-            initial_render_options(&input(ResolvedMode::Text { ansi: true }), requested),
+            initial_render_options(
+                &input(ResolvedMode::Text {
+                    ansi: true,
+                    lang: None,
+                }),
+                requested,
+            ),
             requested
+        );
+    }
+
+    #[test]
+    fn source_file_initial_render_defers_syntax() {
+        let requested = RenderOptions {
+            syntax: true,
+            mermaid: true,
+            table_mode: lessmd::render::TableMode::Truncate,
+        };
+        assert_eq!(
+            initial_render_options(
+                &input(ResolvedMode::Text {
+                    ansi: true,
+                    lang: Some("py".into()),
+                }),
+                requested,
+            ),
+            RenderOptions {
+                syntax: false,
+                mermaid: false,
+                table_mode: lessmd::render::TableMode::Truncate,
+            }
         );
     }
 
@@ -747,7 +783,10 @@ mod tests {
     fn should_use_prefix_when_input_exceeds_limit() {
         let input = source::Input {
             text: "a\nb\nc".to_owned(),
-            render_mode: ResolvedMode::Text { ansi: true },
+            render_mode: ResolvedMode::Text {
+                ansi: true,
+                lang: None,
+            },
             source_path: None,
         };
         assert!(should_use_prefix_input(&input, 2));

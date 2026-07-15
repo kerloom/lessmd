@@ -1141,7 +1141,10 @@ mod tests {
     fn make_state(text: &str, total_height: u16, width: u16) -> PagerState {
         let input = Input {
             text: text.to_owned(),
-            render_mode: ResolvedMode::Text { ansi: false },
+            render_mode: ResolvedMode::Text {
+                ansi: false,
+                lang: None,
+            },
             source_path: None,
         };
         PagerState::new(input, total_height, width, false)
@@ -1162,7 +1165,10 @@ mod tests {
     fn text_input(text: &str) -> Input {
         Input {
             text: text.to_owned(),
-            render_mode: ResolvedMode::Text { ansi: false },
+            render_mode: ResolvedMode::Text {
+                ansi: false,
+                lang: None,
+            },
             source_path: None,
         }
     }
@@ -1751,7 +1757,10 @@ mod tests {
     fn gutter_width_matches_line_count_digits() {
         let input = Input {
             text: "a\n".repeat(120).to_owned(),
-            render_mode: ResolvedMode::Text { ansi: false },
+            render_mode: ResolvedMode::Text {
+                ansi: false,
+                lang: None,
+            },
             source_path: None,
         };
         let s = PagerState::new(input, 24, 80, true);
@@ -1764,7 +1773,10 @@ mod tests {
         let text = "aaaaaaaaaaaa".to_owned();
         let input = Input {
             text,
-            render_mode: ResolvedMode::Text { ansi: false },
+            render_mode: ResolvedMode::Text {
+                ansi: false,
+                lang: None,
+            },
             source_path: None,
         };
         let without = PagerState::new(input.clone(), 24, 10, false);

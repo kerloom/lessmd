@@ -85,7 +85,10 @@ mod tests {
     fn input(text: &str) -> Input {
         Input {
             text: text.to_owned(),
-            render_mode: ResolvedMode::Text { ansi: false },
+            render_mode: ResolvedMode::Text {
+                ansi: false,
+                lang: None,
+            },
             source_path: None,
         }
     }

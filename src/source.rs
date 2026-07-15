@@ -16,7 +16,9 @@ pub struct Input {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedMode {
     /// Plain text. `ansi` = interpret SGR escape sequences as styles.
-    Text { ansi: bool },
+    /// `lang` is a file-extension language hint (e.g. `"py"`, `"rs"`) used for
+    /// whole-file syntax highlighting when the `syntax` feature/option is on.
+    Text { ansi: bool, lang: Option<String> },
     /// Render markdown (M2).
     Markdown,
 }
@@ -76,16 +78,21 @@ fn input_too_large(max_bytes: u64) -> io::Error {
 fn resolve_mode(path: Option<&Path>, mode: RenderMode) -> ResolvedMode {
     match mode {
         RenderMode::Markdown => ResolvedMode::Markdown,
-        RenderMode::Plain => ResolvedMode::Text { ansi: false },
+        RenderMode::Plain => ResolvedMode::Text {
+            ansi: false,
+            lang: None,
+        },
         RenderMode::Auto => {
-            let is_md = path
+            let ext = path
                 .and_then(|p| p.extension())
-                .map(|e| e == "md" || e == "markdown")
-                .unwrap_or(false);
-            if is_md {
-                ResolvedMode::Markdown
-            } else {
-                ResolvedMode::Text { ansi: true }
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase());
+            match ext.as_deref() {
+                Some("md") | Some("markdown") => ResolvedMode::Markdown,
+                other => ResolvedMode::Text {
+                    ansi: true,
+                    lang: other.map(str::to_owned),
+                },
             }
         }
     }
@@ -108,7 +115,35 @@ mod tests {
         );
         assert_eq!(
             resolve_mode(Some(Path::new("x.txt")), RenderMode::Auto),
-            ResolvedMode::Text { ansi: true }
+            ResolvedMode::Text {
+                ansi: true,
+                lang: Some("txt".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn auto_detects_source_file_language_from_extension() {
+        assert_eq!(
+            resolve_mode(Some(Path::new("main.py")), RenderMode::Auto),
+            ResolvedMode::Text {
+                ansi: true,
+                lang: Some("py".into()),
+            }
+        );
+        assert_eq!(
+            resolve_mode(Some(Path::new("App.TSX")), RenderMode::Auto),
+            ResolvedMode::Text {
+                ansi: true,
+                lang: Some("tsx".into()),
+            }
+        );
+        assert_eq!(
+            resolve_mode(Some(Path::new("lib.rs")), RenderMode::Auto),
+            ResolvedMode::Text {
+                ansi: true,
+                lang: Some("rs".into()),
+            }
         );
     }
 
@@ -116,15 +151,32 @@ mod tests {
     fn auto_without_path_defaults_to_text_ansi() {
         assert_eq!(
             resolve_mode(None, RenderMode::Auto),
-            ResolvedMode::Text { ansi: true }
+            ResolvedMode::Text {
+                ansi: true,
+                lang: None,
+            }
         );
     }
 
     #[test]
-    fn plain_strips_ansi() {
+    fn auto_without_extension_has_no_lang() {
         assert_eq!(
-            resolve_mode(Some(Path::new("x.md")), RenderMode::Plain),
-            ResolvedMode::Text { ansi: false }
+            resolve_mode(Some(Path::new("Makefile")), RenderMode::Auto),
+            ResolvedMode::Text {
+                ansi: true,
+                lang: None,
+            }
+        );
+    }
+
+    #[test]
+    fn plain_strips_ansi_and_lang() {
+        assert_eq!(
+            resolve_mode(Some(Path::new("x.py")), RenderMode::Plain),
+            ResolvedMode::Text {
+                ansi: false,
+                lang: None,
+            }
         );
     }
 
