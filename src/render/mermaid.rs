@@ -34,8 +34,7 @@ impl MermaidRenderer for DefaultMermaidRenderer {
     }
 }
 
-/// Fallback deadline when figurehead hangs despite pre-checks. Prefer refusing
-/// known-bad inputs in [`prepare_mermaid_source`] so we never spawn a runaway.
+/// Deadline for each Figurehead render, including retries after a panic.
 #[cfg(feature = "mermaid")]
 const RENDER_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -350,6 +349,7 @@ mod tests {
         );
         for expected in [
             "Processing",
+            "Credited",
             "ManualRetryRequired",
             "Retry fails again",
             "Preserve the original failure",

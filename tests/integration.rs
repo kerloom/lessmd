@@ -239,12 +239,25 @@ fn markdown_state_diagrams_render_cycles_choices_and_notes() {
 
     for expected in [
         "ManualRetryRequired",
+        "Credited",
+        "Returned",
+        "Rejected",
+        "NewBatch",
         "Retry fails again",
         "Authorize -> Book FX -> Send",
         "Original failure row is preserved",
         "Waiting for payment",
+        "Decision",
+        "Settled",
+        "Review",
+        "amount matches",
+        "discrepancy",
         "Validate currency and amount",
         "still incomplete",
+        "Split",
+        "Merge",
+        "First",
+        "Second",
     ] {
         assert!(text.contains(expected), "missing {expected:?}:\n{text}");
     }

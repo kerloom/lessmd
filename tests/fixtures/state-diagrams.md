@@ -24,6 +24,20 @@ stateDiagram-v2
     end note
 ```
 
+## Parallel processing
+
+```mermaid
+stateDiagram-v2
+    state Split <<fork>>
+    state Merge <<join>>
+    [*] --> Split
+    Split --> First
+    Split --> Second
+    First --> Merge
+    Second --> Merge
+    Merge --> [*]
+```
+
 ## Settlement review
 
 ```mermaid

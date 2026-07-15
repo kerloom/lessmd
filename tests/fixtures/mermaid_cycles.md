@@ -11,7 +11,7 @@ flowchart TD
 ```
 
 ```mermaid
-%% leading comments must not bypass state detection
+%% leading Mermaid comments are accepted before the state header
 %%{init: {'theme': 'dark'}}%%
 stateDiagram-v2
     [*] --> Ready
