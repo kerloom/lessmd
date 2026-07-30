@@ -90,13 +90,61 @@ fn mermaid_body_starts_with(source: &str, prefix: &str) -> bool {
 /// Retry once with sequence self-messages stripped (figurehead panics on those).
 #[cfg(feature = "mermaid")]
 fn render_attempt(source: &str) -> Result<String, String> {
-    match render_with_figurehead(source) {
+    let normalized = normalize_flowchart_syntax(source);
+    match render_with_figurehead(normalized.as_deref().unwrap_or(source)) {
         Ok(rendered) => Ok(rendered),
         Err(first_err) => match sanitize_sequence(source) {
             Some(sanitized) => render_with_figurehead(&sanitized).map_err(|_| first_err),
             None => Err(first_err),
         },
     }
+}
+
+#[cfg(feature = "mermaid")]
+fn normalize_flowchart_syntax(source: &str) -> Option<String> {
+    if !mermaid_body_starts_with(source, "flowchart") && !mermaid_body_starts_with(source, "graph")
+    {
+        return None;
+    }
+
+    let mut changed = false;
+    let mut output = String::with_capacity(source.len());
+    for line in source.lines() {
+        let indentation_len = line.len() - line.trim_start().len();
+        let trimmed = line.trim();
+        let subgraph = trimmed
+            .strip_prefix("subgraph ")
+            .and_then(|declaration| declaration.split_once("[\""))
+            .and_then(|(id, title)| {
+                let title = title.strip_suffix("\"]")?;
+                (!id.is_empty()
+                    && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && !title.contains('"'))
+                .then(|| format!("subgraph \"{title}\""))
+            });
+
+        if let Some(normalized) = subgraph {
+            output.push_str(&line[..indentation_len]);
+            output.push_str(&normalized);
+            changed = true;
+        } else {
+            let normalized = line
+                .replace("[\"", "[")
+                .replace("\"]", "]")
+                .replace("{\"", "{")
+                .replace("\"}", "}")
+                .replace("<br/>", " ")
+                .replace("<br />", " ")
+                .replace("<br>", " ")
+                .replace("<b>", "")
+                .replace("</b>", "");
+            changed |= normalized != line;
+            output.push_str(&normalized);
+        }
+        output.push('\n');
+    }
+
+    changed.then_some(output)
 }
 
 /// Silence panics from mermaid worker threads (already caught by
@@ -267,6 +315,50 @@ mod tests {
         let output = renderer.render("graph LR\nA[Start] --> B[End]").unwrap();
         assert!(!output.trim().is_empty());
         assert!(output.contains("Start") || output.contains("A"));
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn figurehead_renders_named_subgraphs_without_dropping_their_nodes() {
+        let _guard = cache_test_lock();
+        clear_cache();
+        let source = r#"flowchart TB
+    subgraph phase_one["Phase One"]
+        A1["Request accepted"] --> A2["Validate input<br/><b>required field</b>"]
+        A2 --> A3["Create record"]
+    end
+
+    subgraph phase_two["Phase Two"]
+        B1["Response received"] --> B2{"Checks pass?"}
+        B2 -->|no| B3["Stop processing"]
+        B2 -->|yes| B4["Publish output"]
+    end
+
+    A3 --> FINAL["Completed"]
+    B4 --> FINAL
+
+    style A2 fill:#ffe6e6,stroke:#c00
+    style B4 fill:#e6ffe9,stroke:#0a0"#;
+
+        let output = DefaultMermaidRenderer
+            .render(source)
+            .expect("should render");
+
+        for expected in [
+            "Request accepted",
+            "Validate input",
+            "Create record",
+            "Phase Two",
+            "Response received",
+            "Checks pass?",
+            "Stop processing",
+            "Publish output",
+            "Completed",
+        ] {
+            assert!(output.contains(expected), "missing {expected:?}:\n{output}");
+        }
+        assert!(!output.contains("<br"));
+        assert!(!output.contains("<b>"));
     }
 
     #[cfg(feature = "mermaid")]
