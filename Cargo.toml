@@ -1,13 +1,14 @@
 [package]
 name = "lessmd"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
+rust-version = "1.95"
 description = "A less-like terminal pager that renders markdown and mermaid"
 license = "MIT"
 
 [features]
 default = ["syntax", "mermaid"]
-mermaid = ["dep:figurehead"]
+mermaid = ["dep:merman"]
 syntax = ["dep:syntect"]
 
 [dependencies]
@@ -15,7 +16,7 @@ ratatui = "0.30.2"
 crossterm = "0.29.0"
 unicode-width = "0.2"
 pulldown-cmark = "0.13"
-figurehead = { git = "https://github.com/kerloom/figurehead-rs", branch = "master", optional = true, features = ["sequence", "class", "state"] }
+merman = { git = "https://github.com/Latias94/merman", tag = "v0.8.0-alpha.5", optional = true, default-features = false, features = ["ascii"] }
 syntect = { version = "5.3", optional = true, default-features = false, features = ["parsing", "default-syntaxes", "default-themes", "dump-load", "regex-fancy"] }
 
 [profile.release]

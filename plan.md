@@ -8,11 +8,11 @@ Built from scratch in Rust for simplicity, minimal dependencies, and readable co
 - **Build from scratch in Rust** — don't fork `less` (C / GPL / autotools; adding a
   markdown viewport is invasive; the `LESSOPEN` preprocessor route is a stopgap, not a
   first-class product). Don't use Zig (no mature TUI ecosystem — would reinvent ratatui).
-- **Stack:** `ratatui` + `crossterm` + `pulldown-cmark` (phase 1) + `figurehead` (phase 2).
+- **Stack:** `ratatui` + `crossterm` + `pulldown-cmark` (phase 1) + `merman` (phase 2).
   All MIT / lean, pure Rust, static binary, no scripting runtimes, no system libraries.
 - **Markdown:** custom ~300–500 line renderer on top of pulldown-cmark events. Every line
   is ours; minimal deps; full control.
-- **Mermaid:** `figurehead` (pure-Rust ASCII/Unicode) behind a swappable trait, with
+- **Mermaid:** `merman` (pure-Rust ASCII/Unicode) behind a swappable trait, with
   graceful fallback to a plain code block on error.
 - **Pre-render to `Vec<Line<'static>>`** — the whole document is rendered up-front to a
   flat vector of terminal rows (already wrapped to width). The pager just slices a window
@@ -54,7 +54,7 @@ lessmd/
 │       ├── mod.rs             # Renderer trait + dispatch (text vs markdown)
 │       ├── text.rs            # plain text → Vec<Line>, optional ANSI pass-through
 │       ├── markdown.rs        # pulldown-cmark events → Vec<Line>  (phase 1)
-│       └── mermaid.rs         # MermaidRenderer trait + figurehead impl (phase 2)
+│       └── mermaid.rs         # MermaidRenderer trait + Merman impl (phase 2)
 └── tests/
     ├── fixtures/
     │   ├── plain.txt
@@ -76,7 +76,7 @@ lessmd/
   like `less -R`), wrap to width. ~50 lines.
 - **`render/markdown.rs`** — iterate `pulldown::Parser` events, maintain a small stack
   of inline style state, emit `Line`s. Re-wrap on width change by re-running render.
-- **`render/mermaid.rs`** — `MermaidRenderer` trait + `FigureheadRenderer` impl +
+- **`render/mermaid.rs`** — `MermaidRenderer` trait + Merman Unicode impl +
   fallback to source-as-codeblock on error.
 - **`document.rs`** — holds `lines: Vec<Line<'static>>` and `source_path`. Methods:
   `render(Input, width) -> Self`, `line_count()`, `slice(offset, height)`.
@@ -99,7 +99,7 @@ match · `Ctrl-C` abort search · arrows/mouse wheel optional (phase 3).
 ratatui = "0.30"          # TUI toolkit (MIT)
 crossterm = "0.28"        # terminal backend (MIT)
 pulldown-cmark = "0.13"   # markdown parser (MIT) — phase 1
-figurehead = "0.4"        # mermaid → ASCII (MIT) — phase 2, feature-gated
+merman = { git = "https://github.com/Latias94/merman", tag = "v0.8.0-alpha.5", default-features = false, features = ["ascii"] }
 
 [profile.release]
 lto = true
@@ -119,6 +119,8 @@ cargo test --features mermaid      # once phase 2 lands
 
 ## Session Tracker
 
+- 2026-08-10: Replaced Figurehead with Merman `v0.8.0-alpha.5` from its GitHub release tag, enabling only the `ascii` capability. Removed Figurehead syntax/retry workarounds, preserved timeout/cache/panic isolation and raw fallback, raised MSRV to Rust 1.95, updated tests for Merman's supported and explicitly unsupported state layouts, and bumped lessmd to 0.6.0. Verified release build, fmt, clippy, and tests with default and no-default features.
+- 2026-07-30: Fixed complex Mermaid flowcharts that use named subgraphs, quoted node labels, and basic HTML labels being partially rendered as bare node IDs. Added pre-render syntax normalization and a synthetic regression test covering multiple subgraphs, decision branches, cross-subgraph edges, styles, and HTML labels. Verified fmt, clippy, and tests with default and no-default features.
 - 2026-07-15: Integrated merged `figurehead` state-diagram support for cyclic and self transitions, notes, state descriptions, choices/forks/joins, and wrapped transition labels. Enabled the GitHub dependency's `state` feature, removed state cycle sanitization/refusal, and added simple and complex end-to-end fixtures. Refined the renderer layout to protect boxes, reduce spacing, and close self-loop routes after their labels. Bumped lessmd to 0.5.0. Verified renderer fmt/clippy/tests and lessmd release build, fmt, clippy, and tests with default and no-default features.
 - 2026-06-21: Improved Markdown aesthetics: H1/H2 separators, no heading-level indentation, inline code backticks, framed code blocks. Added table render mode (`truncate` default, `expand` for horizontal panning) with `--expand-tables`, `--truncate-tables`, and runtime `w` toggle. Verified with fmt, clippy (default and no-default-features), and tests (default and no-default-features).
 
@@ -214,14 +216,14 @@ ENABLE_SMART_PUNCTUATION`.
 ### Phase 2 — Mermaid (M3)
 
 **Scope:** intercept ```` ```mermaid ```` blocks during markdown render; render via
-`figurehead`; fallback to source-as-codeblock on error.
+`merman`; fallback to source-as-codeblock on error.
 
 **Tests (phase 2):**
 - Unit (`render/mermaid.rs`):
   - `detects_mermaid_fenced_block` — parser routes block to `MermaidRenderer`
-  - `figurehead_renders_simple_flowchart` — a 2-node flowchart yields >= 1 non-empty
+  - `merman_renders_simple_flowchart` — a 2-node flowchart yields >= 1 non-empty
     `Line` containing box-drawing chars
-  - `figurehead_renders_sequence_diagram` — yields lines containing `─`/`▶` or arrows
+  - `merman_renders_sequence_diagram` — yields lines containing `─`/`▶` or arrows
   - `renders_unsupported_diagram_as_codeblock_fallback` — on `Err`, output equals the
     plain codeblock render plus a dim note line
   - `renders_invalid_mermaid_as_codeblock_fallback` — syntactically invalid source →
@@ -261,7 +263,7 @@ Update this table at the end of each session. Mark items `[x]` when done and ver
 | M0 — Skeleton | Cargo project, alt-screen hello-world, clean teardown | [x] done | 1 | fmt/clippy/test green; uses `ratatui::run` (init+restore+panic hook) |
 | M1 — Plain-text pager | source + render/text + pager + input + search + help | [x] done | 1 | lib+bin split; 46 unit + 4 integration tests; hand-rolled ANSI SGR parser; substring search |
 | M2 — Markdown | render/markdown for all phase-1b features + per-feature tests | [x] done | 1 | pulldown-cmark 0.13; 21 unit + 7 integration markdown tests; tables/lists/blockquotes/code/inline all render |
-| M3 — Mermaid | render/mermaid + figurehead + fallback + tests | [x] done | 2 | optional `figurehead`; swappable renderer trait; valid diagrams render with `--features mermaid`; disabled/error paths fall back to code block + note; fmt/clippy/test + feature test green |
+| M3 — Mermaid | render/mermaid + Merman + fallback + tests | [x] done | 2 | optional `merman`; swappable renderer trait; valid diagrams render with `--features mermaid`; disabled/error paths fall back to code block + note; fmt/clippy/test + feature test green |
 | M4 — Polish | highlights / OSC8 / line-numbers / config (optional) | [x] done | 7 | Jump-to-heading (outline overlay `o`, `t`/`T` keys), `--line-numbers` / `-N` flag, section folding (`Tab` key with visible-line-map). OSC8 deferred (ratatui 0.30 has no hyperlink support). 129 unit + 12 integration tests green. |
 | M5 — Syntax highlighting | syntect behind `syntax` feature, highlight cache | [x] done | 9 | `syntect 5.3` with `default-fancy` (pure-Rust `fancy-regex`), `base16-ocean.dark` theme. `highlight_code()` in `src/render/syntax.rs` with `LazyLock<SyntaxSet/ThemeSet>`. Highlight cache (`HashMap<(lang, code), Vec<Line>>`, max 256 entries) so resize re-wraps instead of re-highlights (~6 µs/block vs ~150 µs/block, ~30× faster resize). 60 syntax unit tests (25 languages + aliases + cache behavior + style mapping). 2 perf tests for render + resize with cache. 192 unit + 12 integration + 14 perf green with `--features syntax`. |
 | M6 — Instant first paint | default enhancements + plain-first background render | [x] done | 10 | Cargo defaults now include `syntax` + `mermaid`; runtime flags `--no-syntax` / `--no-mermaid` disable enhancements. Markdown opens with syntax/Mermaid off, draws immediately, then swaps in a background enhanced render. Startup perf (`perf_startup_two_phase_render`): 10 blocks 147ms full enhanced → 180µs plain-first; 100 blocks 76ms → 399µs; 500 blocks 5.5ms → 2.0ms. |
@@ -351,8 +353,8 @@ cargo test` (add `--features mermaid` from M3 on).
 - [x] verification commands green
 
 #### M3 — Mermaid
-- [x] add `figurehead` dep behind `[features] mermaid = ["dep:figurehead"]`
-- [x] `src/render/mermaid.rs`: `MermaidRenderer` trait + default figurehead renderer
+- [x] add `merman` ASCII dep behind `[features] mermaid = ["dep:merman"]`
+- [x] `src/render/mermaid.rs`: `MermaidRenderer` trait + default Merman renderer
 - [x] intercept ```` ```mermaid ```` in `render/markdown.rs`
 - [x] fallback to codeblock + dim note on `Err` / unsupported type / renderer panic
 - [x] tests: detection, flowchart, sequence, unsupported fallback, invalid fallback,

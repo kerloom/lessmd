@@ -1560,7 +1560,7 @@ mod tests {
 
     #[cfg(feature = "mermaid")]
     #[test]
-    fn renders_erdiagram_via_real_figurehead() {
+    fn renders_erdiagram_via_real_merman() {
         let md = "```mermaid\nerDiagram\n    PayGroup {\n        int Id PK\n        varchar Name\n    }\n    PayGroupUserMapping {\n        int Id PK\n        int PayGroupId FK\n    }\n    PayGroup ||--o{ PayGroupUserMapping : \"has users\"\n```";
         let out = render_markdown(md, 80);
         assert_eq!(

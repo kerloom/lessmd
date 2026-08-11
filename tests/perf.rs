@@ -526,7 +526,7 @@ fn perf_document_new_overall() {
 // ---------------------------------------------------------------------------
 //
 // `DefaultMermaidRenderer` returns an error when the `mermaid` feature is
-// off (fallback path) and calls `figurehead::render` when it's on.  These
+// off (fallback path) and calls Merman's Unicode renderer when it's on. These
 // two tests let you compare the two code paths:
 //
 //   cargo test --test perf perf_mermaid -- --ignored --nocapture
@@ -635,8 +635,8 @@ fn perf_mermaid_sequence_render() {
 
 /// Compare markdown rendering with mermaid diagrams embedded.
 /// Without the feature, each ```` ```mermaid ```` block falls back to a
-/// code block + error note.  With the feature, figurehead renders each
-/// diagram to ASCII art.
+/// code block + error note. With the feature, Merman renders each
+/// diagram to Unicode art.
 #[test]
 #[ignore]
 fn perf_mermaid_markdown_with_diagrams() {
