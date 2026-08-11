@@ -30,7 +30,7 @@ Or download archives manually from [GitHub Releases](https://github.com/kerloom/
 
 ### From source
 
-Requires Rust 1.85+ (edition 2024):
+Requires Rust 1.95+ (edition 2024):
 
 ```sh
 cargo install --git https://github.com/kerloom/lessmd
@@ -55,7 +55,7 @@ xcrun codesign --force --sign - ~/.local/bin/lessmd
 
 - **Markdown rendering** — headings, emphasis, lists, blockquotes, tables, links, fenced code
 - **Syntax highlighting** — fenced code blocks via syntect (disable with `--no-syntax`)
-- **Mermaid diagrams** — inline ASCII/Unicode rendering via figurehead (disable with `--no-mermaid`)
+- **Mermaid diagrams** — inline Unicode rendering via Merman (disable with `--no-mermaid`)
 - **Less-compatible navigation** — scroll, search, goto line/percent, digit prefixes (`5j`, `10G`)
 - **Markdown extras** — heading jump (`t`/`T`), outline (`o`), fold headings (`Tab`), table width toggle and pan (`w`/`h`/`l`)
 - **Plain text mode** — auto-detect by extension (`.md`/`.markdown`), or force with `--markdown` / `--plain`
@@ -103,7 +103,7 @@ cargo build --no-default-features
 | Feature | Default | Description |
 | --- | --- | --- |
 | `syntax` | yes | Fenced-code syntax highlighting (syntect) |
-| `mermaid` | yes | Inline Mermaid rendering (figurehead) |
+| `mermaid` | yes | Inline Mermaid rendering (Merman) |
 
 ## License
 

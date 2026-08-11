@@ -597,7 +597,7 @@ fn draw_outline(frame: &mut Frame, state: &PagerState) {
     let inner_h = (area.height as usize).saturating_sub(2);
     let scroll = sel
         .saturating_sub(inner_h / 2)
-        .min(headings.len().saturating_sub(inner_h).max(0));
+        .min(headings.len().saturating_sub(inner_h));
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     for (i, h) in headings.iter().enumerate() {

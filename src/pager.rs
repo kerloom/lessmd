@@ -160,7 +160,7 @@ impl PagerState {
             offset: 0,
             h_offset: 0,
             height: viewport,
-            width: content_width as u16,
+            width: content_width,
             mode: Mode::Normal,
             search: None,
             quit: false,
@@ -552,7 +552,7 @@ impl PagerState {
             wrap_width
         };
         if content_width != self.width {
-            self.width = content_width as u16;
+            self.width = content_width;
             self.doc = render_doc(
                 &self.input,
                 wrap_width,
