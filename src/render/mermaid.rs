@@ -28,7 +28,13 @@ impl MermaidRenderer for DefaultMermaidRenderer {
         install_quiet_mermaid_hook();
         let cache_key = source.to_owned();
         let render_source = cache_key.clone();
-        let result = run_with_timeout(RENDER_TIMEOUT, move || render_with_merman(&render_source));
+        let control = merman::OperationControl::new().with_deadline(RENDER_TIMEOUT);
+        let render_control = control.clone();
+        let result = run_with_timeout(
+            RENDER_TIMEOUT,
+            move || control.cancel(),
+            move || render_with_merman(&render_source, render_control),
+        );
         cache_insert(cache_key, result.clone());
         result
     }
@@ -41,16 +47,15 @@ const RENDER_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(feature = "mermaid")]
 const MERMAID_THREAD: &str = "lessmd-mermaid";
 
-/// Run `f` on a worker thread, abandoning it on timeout.
+/// Run `f` on a worker thread, invoking `on_timeout` before abandoning it.
 ///
-/// Rust cannot kill a thread stuck in a loop, so a hung render leaks its
-/// worker thread until the process exits (the thread eventually finishes or
-/// dies on `tx.send` failing into a dropped channel). The result is cached,
-/// so a given pathological source leaks at most one thread per program run.
+/// Rust cannot kill a thread stuck outside cooperative checkpoints, so it may
+/// remain alive until the work finishes or the process exits.
 #[cfg(feature = "mermaid")]
-fn run_with_timeout<F>(timeout: Duration, f: F) -> Result<String, String>
+fn run_with_timeout<F, C>(timeout: Duration, on_timeout: C, f: F) -> Result<String, String>
 where
     F: FnOnce() -> Result<String, String> + Send + 'static,
+    C: FnOnce(),
 {
     use std::sync::mpsc::{self, RecvTimeoutError};
 
@@ -67,6 +72,7 @@ where
     match rx.recv_timeout(timeout) {
         Ok(result) => result,
         Err(RecvTimeoutError::Timeout) => {
+            on_timeout();
             Err(format!("render timed out after {}ms", timeout.as_millis()))
         }
         Err(RecvTimeoutError::Disconnected) => {
@@ -136,20 +142,30 @@ fn cache_len() -> usize {
 }
 
 #[cfg(feature = "mermaid")]
-fn render_with_merman(source: &str) -> Result<String, String> {
-    use merman::ascii::{AsciiRenderOptions, HeadlessAsciiRenderer};
+fn render_with_merman(source: &str, control: merman::OperationControl) -> Result<String, String> {
+    use merman::ascii::AsciiRenderOptions;
+    use merman::{AsciiRequest, ParseOptions, RenderOutput, RenderRequest, Renderer};
 
-    static RENDERER: LazyLock<HeadlessAsciiRenderer> = LazyLock::new(|| {
-        HeadlessAsciiRenderer::new()
-            .with_strict_parsing()
-            .with_ascii_options(AsciiRenderOptions::unicode())
-    });
+    static RENDERER: LazyLock<Renderer> =
+        LazyLock::new(|| Renderer::new().with_parse_options(ParseOptions::strict()));
 
     // Merman's terminal backend otherwise emits these common label tags literally.
     let source = source.replace("<b>", "").replace("</b>", "");
-    catch_panic(|| RENDERER.render_ascii_sync(&source))?
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| "no Mermaid diagram detected".to_owned())
+    let output = catch_panic(|| {
+        RENDERER.render(RenderRequest::ascii(
+            &source,
+            control,
+            AsciiRequest {
+                options: AsciiRenderOptions::unicode(),
+                ..Default::default()
+            },
+        ))
+    })?
+    .map_err(|err| err.to_string())?;
+    let RenderOutput::Ascii(Some(report)) = output else {
+        return Err("no Mermaid diagram detected".to_owned());
+    };
+    Ok(report.text)
 }
 
 /// Run `f`, converting a panic into an `Err`. Worker panic output is suppressed
@@ -157,9 +173,10 @@ fn render_with_merman(source: &str) -> Result<String, String> {
 #[cfg(feature = "mermaid")]
 fn catch_panic<F, T>(f: F) -> Result<T, String>
 where
-    F: FnOnce() -> T + std::panic::UnwindSafe,
+    F: FnOnce() -> T,
 {
-    std::panic::catch_unwind(f).map_err(|payload| panic_message(payload.as_ref()))
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .map_err(|payload| panic_message(payload.as_ref()))
 }
 
 #[cfg(feature = "mermaid")]
@@ -216,6 +233,42 @@ mod tests {
         let output = renderer.render("graph LR\nA[Start] --> B[End]").unwrap();
         assert!(!output.trim().is_empty());
         assert!(output.contains("Start") || output.contains("A"));
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn merman_preserves_unicode_grapheme_labels() {
+        let source = "flowchart LR\nA[\"Cafe\u{301} 👩‍💻 東京\"] --> B[Done]";
+        let output = render_with_merman(source, merman::OperationControl::new()).unwrap();
+
+        for expected in ["Cafe\u{301}", "👩‍💻", "東京", "Done"] {
+            assert!(output.contains(expected), "missing {expected:?}:\n{output}");
+        }
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn merman_wraps_long_flowchart_labels_without_losing_words() {
+        let label = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu";
+        let source = format!("flowchart TB\nA[\"{label}\"] --> B[Done]");
+        let output = render_with_merman(&source, merman::OperationControl::new()).unwrap();
+
+        assert!(!output.contains(label), "label should wrap:\n{output}");
+        for expected in label.split_whitespace() {
+            assert!(output.contains(expected), "missing {expected:?}:\n{output}");
+        }
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn merman_reports_when_no_diagram_is_present() {
+        let error = render_with_merman(
+            "ordinary prose without a diagram",
+            merman::OperationControl::new(),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "No Mermaid diagram type detected");
     }
 
     #[cfg(feature = "mermaid")]
@@ -352,21 +405,34 @@ mod tests {
 
     #[cfg(feature = "mermaid")]
     #[test]
-    fn run_with_timeout_abandons_a_hanging_render() {
-        let result = run_with_timeout(Duration::from_millis(50), || {
-            loop {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        });
+    fn run_with_timeout_cancels_cooperative_work() {
+        let control = merman::OperationControl::new();
+        let render_control = control.clone();
+        let cancel_control = control.clone();
+        let (cancelled_tx, cancelled_rx) = std::sync::mpsc::channel();
+        let result = run_with_timeout(
+            Duration::from_millis(50),
+            move || cancel_control.cancel(),
+            move || {
+                while render_control.checkpoint().is_ok() {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                let _ = cancelled_tx.send(());
+                Err("cancelled".to_owned())
+            },
+        );
         assert!(result.unwrap_err().contains("timed out"));
+        cancelled_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker should observe cancellation");
     }
 
     #[cfg(feature = "mermaid")]
     #[test]
     fn run_with_timeout_passes_fast_results_through() {
-        let ok = run_with_timeout(Duration::from_secs(5), || Ok("done".to_owned()));
+        let ok = run_with_timeout(Duration::from_secs(5), || {}, || Ok("done".to_owned()));
         assert_eq!(ok.unwrap(), "done");
-        let err = run_with_timeout(Duration::from_secs(5), || Err("nope".to_owned()));
+        let err = run_with_timeout(Duration::from_secs(5), || {}, || Err("nope".to_owned()));
         assert_eq!(err.unwrap_err(), "nope");
     }
 

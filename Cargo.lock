@@ -395,6 +395,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "dugong"
+version = "0.8.0-alpha.6"
+source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.6#d529f858ea3d337a1bdc8fe12e44e1403ededf2e"
+dependencies = [
+ "dugong-graphlib",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "dugong-graphlib"
+version = "0.8.0-alpha.6"
+source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.6#d529f858ea3d337a1bdc8fe12e44e1403ededf2e"
+dependencies = [
+ "hashbrown 0.17.1",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -979,28 +1001,33 @@ dependencies = [
 
 [[package]]
 name = "merman"
-version = "0.8.0-alpha.5"
-source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.5#fb1dd48e4612e20c47673c0268f88aab02afd26c"
+version = "0.8.0-alpha.6"
+source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.6#d529f858ea3d337a1bdc8fe12e44e1403ededf2e"
 dependencies = [
  "merman-ascii",
  "merman-core",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "merman-ascii"
-version = "0.8.0-alpha.5"
-source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.5#fb1dd48e4612e20c47673c0268f88aab02afd26c"
+version = "0.8.0-alpha.6"
+source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.6#d529f858ea3d337a1bdc8fe12e44e1403ededf2e"
 dependencies = [
+ "dugong",
  "merman-core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
+ "unicode-segmentation",
  "unicode-width",
 ]
 
 [[package]]
 name = "merman-core"
-version = "0.8.0-alpha.5"
-source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.5#fb1dd48e4612e20c47673c0268f88aab02afd26c"
+version = "0.8.0-alpha.6"
+source = "git+https://github.com/Latias94/merman?tag=v0.8.0-alpha.6#d529f858ea3d337a1bdc8fe12e44e1403ededf2e"
 dependencies = [
  "euclid",
  "granit-parser",
@@ -1015,6 +1042,8 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "unicode-general-category",
+ "unicode-segmentation",
+ "unicode-width",
  "url",
 ]
 
