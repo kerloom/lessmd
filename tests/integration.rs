@@ -304,8 +304,8 @@ fn markdown_mermaid_fixture_renders_with_feature() {
 
 #[cfg(feature = "mermaid")]
 #[test]
-fn markdown_state_diagrams_preserve_unsupported_complex_sources() {
-    let path = std::path::Path::new("tests/fixtures/state-diagrams.md");
+fn markdown_unsupported_state_routing_preserves_source() {
+    let path = std::path::Path::new("tests/fixtures/state-payment-recovery.md");
     let input = read(Some(path), RenderMode::Auto).unwrap();
     let doc = Document::new(&input, 240);
     let text = all_text(&doc.lines);
@@ -319,18 +319,47 @@ fn markdown_state_diagrams_preserve_unsupported_complex_sources() {
         "Retry fails again",
         "Authorize -> Book FX -> Send",
         "Original failure row is preserved",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?}:\n{text}");
+    }
+    assert_eq!(text.matches("mermaid render failed:").count(), 1);
+    assert!(text.contains("stateDiagram-v2\n│     [*] --> Processing"));
+}
+
+#[cfg(feature = "mermaid")]
+#[test]
+fn markdown_state_fork_and_join_render_without_fallback() {
+    let path = std::path::Path::new("tests/fixtures/state-parallel-processing.md");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    let doc = Document::new(&input, 240);
+    let text = all_text(&doc.lines);
+
+    for expected in ["First", "Second"] {
+        assert!(text.contains(expected), "missing {expected:?}:\n{text}");
+    }
+    assert!(!text.contains("mermaid render failed:"));
+    assert!(!text.contains("state Split <<fork>>"));
+}
+
+#[cfg(feature = "mermaid")]
+#[test]
+fn markdown_state_choice_renders_without_fallback() {
+    let path = std::path::Path::new("tests/fixtures/state-settlement-review.md");
+    let input = read(Some(path), RenderMode::Auto).unwrap();
+    let doc = Document::new(&input, 240);
+    let text = all_text(&doc.lines);
+
+    for expected in [
         "Waiting for payment",
-        "Decision",
         "Settled",
         "Review",
         "amount matches",
         "discrepancy",
         "Validate currency and amount",
         "still incomplete",
-        "First",
-        "Second",
     ] {
         assert!(text.contains(expected), "missing {expected:?}:\n{text}");
     }
-    assert!(text.contains("mermaid render failed:"));
+    assert!(!text.contains("mermaid render failed:"));
+    assert!(!text.contains("state Decision <<choice>>"));
 }

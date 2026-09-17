@@ -99,7 +99,7 @@ match · `Ctrl-C` abort search · arrows/mouse wheel optional (phase 3).
 ratatui = "0.30"          # TUI toolkit (MIT)
 crossterm = "0.28"        # terminal backend (MIT)
 pulldown-cmark = "0.13"   # markdown parser (MIT) — phase 1
-merman = { git = "https://github.com/Latias94/merman", tag = "v0.8.0-alpha.5", default-features = false, features = ["ascii"] }
+merman = { git = "https://github.com/Latias94/merman", tag = "v0.8.0-alpha.6", default-features = false, features = ["ascii"] }
 
 [profile.release]
 lto = true
@@ -119,6 +119,7 @@ cargo test --features mermaid      # once phase 2 lands
 
 ## Session Tracker
 
+- 2026-09-17: Upgraded Merman from `v0.8.0-alpha.5` to `v0.8.0-alpha.6` and migrated terminal rendering from the removed `HeadlessAsciiRenderer` API to operation-scoped `Renderer` and typed ASCII requests. Preserved strict parsing, Unicode output, caching, worker timeout, panic isolation, and source fallback. Added cooperative deadline/cancellation handling and focused coverage for Unicode graphemes, long label wrapping, no-diagram errors, fork/join and choice rendering, and unsupported complex state routing fallback. Verified fmt, clippy, and tests with default and no-default features.
 - 2026-08-10: Replaced Figurehead with Merman `v0.8.0-alpha.5` from its GitHub release tag, enabling only the `ascii` capability. Removed Figurehead syntax/retry workarounds, preserved timeout/cache/panic isolation and raw fallback, raised MSRV to Rust 1.95, updated tests for Merman's supported and explicitly unsupported state layouts, and bumped lessmd to 0.6.0. Verified release build, fmt, clippy, and tests with default and no-default features.
 - 2026-07-30: Fixed complex Mermaid flowcharts that use named subgraphs, quoted node labels, and basic HTML labels being partially rendered as bare node IDs. Added pre-render syntax normalization and a synthetic regression test covering multiple subgraphs, decision branches, cross-subgraph edges, styles, and HTML labels. Verified fmt, clippy, and tests with default and no-default features.
 - 2026-07-15: Integrated merged `figurehead` state-diagram support for cyclic and self transitions, notes, state descriptions, choices/forks/joins, and wrapped transition labels. Enabled the GitHub dependency's `state` feature, removed state cycle sanitization/refusal, and added simple and complex end-to-end fixtures. Refined the renderer layout to protect boxes, reduce spacing, and close self-loop routes after their labels. Bumped lessmd to 0.5.0. Verified renderer fmt/clippy/tests and lessmd release build, fmt, clippy, and tests with default and no-default features.
