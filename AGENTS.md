@@ -32,6 +32,10 @@ Skipped automatically when:
 
 To retry or override: *Actions → Release → Run workflow* with **force** (optional **draft**).
 
+Prefer crates.io releases for `merman` over git tags: published crates omit the repo docs/tests
+tree, which has previously exceeded the Windows `MAX_PATH` limit during Cargo's git checkout and
+broken the Windows release jobs (`error: path too long ... class=Filesystem (30)`).
+
 Build targets: x86_64 + aarch64 for Linux, macOS, and Windows. Each release includes archives and `SHA256SUMS`.
 
 ## Install (pre-built)
