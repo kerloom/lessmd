@@ -64,7 +64,8 @@ cargo test --no-default-features
 
 - **Language:** Rust, edition 2024.
 - **Deps:** keep minimal — `ratatui`, `crossterm`, `pulldown-cmark` (M2),
-  `merman` with only its `ascii` capability behind a `mermaid` feature (M3),
+  `merman` (crates.io) with only its `ascii` + `all-diagrams` capabilities behind
+  a `mermaid` feature (M3),
   `syntect` behind a `syntax` feature (M5). No clap yet (hand-rolled args).
 - **Architecture:** `PagerState` (and all pager logic) must stay pure — no
   terminal I/O outside `main.rs`. This keeps it unit-testable.
