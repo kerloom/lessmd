@@ -99,7 +99,7 @@ match · `Ctrl-C` abort search · arrows/mouse wheel optional (phase 3).
 ratatui = "0.30"          # TUI toolkit (MIT)
 crossterm = "0.28"        # terminal backend (MIT)
 pulldown-cmark = "0.13"   # markdown parser (MIT) — phase 1
-merman = { git = "https://github.com/Latias94/merman", tag = "v0.8.0-alpha.6", default-features = false, features = ["ascii"] }
+merman = { git = "https://github.com/Latias94/merman", tag = "v0.9.0", default-features = false, features = ["ascii", "all-diagrams"] }
 
 [profile.release]
 lto = true
@@ -119,6 +119,8 @@ cargo test --features mermaid      # once phase 2 lands
 
 ## Session Tracker
 
+- 2026-10-12 (release preparation): Bumped lessmd to `0.6.2` for the Merman upgrade. DeepSeek V4.1 Flash review found no blockers and independently confirmed feature gating, optional dependency scope, API compatibility, and the continued need for `<b>` stripping. Clarified regression test names; reran all required gates plus debug/release builds. Also verified Mermaid-only and syntax-only test/lint configurations. Prepared the reviewed upgrade PR on `chore/merman-0.9.0`.
+- 2026-10-12: Upgraded Merman from `v0.8.0-alpha.6` to `v0.9.0`, explicitly enabling `all-diagrams` alongside `ascii` to preserve the parser surface after family feature gating. Refreshed Merman's dependency closure without upgrading unrelated direct dependencies. Existing Renderer/AsciiRequest integration, Unicode defaults, timeout/cancellation, cache, panic isolation, and source fallback remain unchanged. Added regressions for complete Sequence message spacing and bidirectional State transition labels. Verified debug/release builds, fmt, clippy, and tests with default and no-default features. Complex unsupported state routing still falls back to source. Upstream delta also includes Mermaid 12.1 compatibility, safer deep-model cleanup, terminal routing/frame fixes, and optional per-axis node padding (not enabled by lessmd).
 - 2026-09-17: Upgraded Merman from `v0.8.0-alpha.5` to `v0.8.0-alpha.6` and migrated terminal rendering from the removed `HeadlessAsciiRenderer` API to operation-scoped `Renderer` and typed ASCII requests. Preserved strict parsing, Unicode output, caching, worker timeout, panic isolation, and source fallback. Added cooperative deadline/cancellation handling and focused coverage for Unicode graphemes, long label wrapping, no-diagram errors, fork/join and choice rendering, and unsupported complex state routing fallback. Verified fmt, clippy, and tests with default and no-default features.
 - 2026-08-10: Replaced Figurehead with Merman `v0.8.0-alpha.5` from its GitHub release tag, enabling only the `ascii` capability. Removed Figurehead syntax/retry workarounds, preserved timeout/cache/panic isolation and raw fallback, raised MSRV to Rust 1.95, updated tests for Merman's supported and explicitly unsupported state layouts, and bumped lessmd to 0.6.0. Verified release build, fmt, clippy, and tests with default and no-default features.
 - 2026-07-30: Fixed complex Mermaid flowcharts that use named subgraphs, quoted node labels, and basic HTML labels being partially rendered as bare node IDs. Added pre-render syntax normalization and a synthetic regression test covering multiple subgraphs, decision branches, cross-subgraph edges, styles, and HTML labels. Verified fmt, clippy, and tests with default and no-default features.
@@ -354,6 +356,9 @@ cargo test` (add `--features mermaid` from M3 on).
 - [x] verification commands green
 
 #### M3 — Mermaid
+- [x] Bump lessmd to `0.6.2` and complete DeepSeek V4.1 Flash review (no blockers; clarified regression test names).
+- [x] Rerun verification and prepare the reviewed Merman 0.9.0 upgrade PR.
+- [x] Upgrade Merman to `v0.9.0`, retain diagram parsers with `all-diagrams`, refresh the lockfile, and verify label-routing regressions plus default/minimal builds.
 - [x] add `merman` ASCII dep behind `[features] mermaid = ["dep:merman"]`
 - [x] `src/render/mermaid.rs`: `MermaidRenderer` trait + default Merman renderer
 - [x] intercept ```` ```mermaid ```` in `render/markdown.rs`

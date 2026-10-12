@@ -330,6 +330,33 @@ mod tests {
 
     #[cfg(feature = "mermaid")]
     #[test]
+    fn merman_preserves_sequence_message_between_lifelines() {
+        let source =
+            "sequenceDiagram\nparticipant API\nparticipant DB\nAPI->>DB: find user by email";
+        let output = render_with_merman(source, merman::OperationControl::new()).unwrap();
+
+        let message = output
+            .lines()
+            .find(|line| line.contains("find user by email"))
+            .expect("complete message should fit on one row");
+        let (before, after) = message.split_once("find user by email").unwrap();
+        assert!(before.contains('│') && after.contains('│'), "{output}");
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
+    fn merman_keeps_both_labels_for_bidirectional_state_transitions() {
+        let source =
+            "stateDiagram-v2\nDraft --> Review: submit\nReview --> Draft: changes requested";
+        let output = render_with_merman(source, merman::OperationControl::new()).unwrap();
+
+        for expected in ["Draft", "Review", "submit", "changes requested"] {
+            assert!(output.contains(expected), "missing {expected:?}:\n{output}");
+        }
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
     fn default_renderer_caches_mermaid_results() {
         let _guard = cache_test_lock();
         clear_cache();
