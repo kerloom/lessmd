@@ -99,7 +99,7 @@ match · `Ctrl-C` abort search · arrows/mouse wheel optional (phase 3).
 ratatui = "0.30"          # TUI toolkit (MIT)
 crossterm = "0.28"        # terminal backend (MIT)
 pulldown-cmark = "0.13"   # markdown parser (MIT) — phase 1
-merman = { version = "0.9.0", default-features = false, features = ["ascii", "all-diagrams"] }
+merman = { version = "=0.10.0-alpha.1", default-features = false, features = ["ascii", "all-diagrams"] }
 
 [profile.release]
 lto = true
@@ -118,6 +118,8 @@ cargo test --features mermaid      # once phase 2 lands
 (These will also be recorded in `AGENTS.md` so future sessions know to run them.)
 
 ## Session Tracker
+
+- 2026-11-10: Upgraded Merman to crates.io v0.10.0-alpha.1 with explicit diagram features and bumped lessmd to 0.6.4 for release. Recorded the reported cross-subgraph flowchart as a regression fixture; upstream still reports its edges as unroutable.
 
 - 2026-10-12 (release fix): Moved `merman` from the GitHub release tag to the crates.io `0.9.0` release. Windows release builds failed to check out the Git dependency because Merman 0.9.0's repository added `docs/knowledge/engineering/logs/2026-09/<very long name>.md`, which exceeds the Windows `MAX_PATH` limit during Cargo's git checkout (`error: path too long ... class=Filesystem (30)`). Published crates exclude the repo-root `docs/` tree, so crates.io removes the failure mode, speeds CI by dropping the large git checkout, and matches upstream's recommended `merman = "0.9.0"` usage. Verified all Merman crates resolve from the crates.io registry (no git sources remain in `Cargo.lock`), bumped lessmd to `0.6.3` so the release workflow detects a version change (the failed `0.6.2` never shipped), and reran the full gate with `--locked` plus Mermaid-only and syntax-only configurations.
 - 2026-10-12 (release preparation): Bumped lessmd to `0.6.2` for the Merman upgrade. DeepSeek V4.1 Flash review found no blockers and independently confirmed feature gating, optional dependency scope, API compatibility, and the continued need for `<b>` stripping. Clarified regression test names; reran all required gates plus debug/release builds. Also verified Mermaid-only and syntax-only test/lint configurations. Prepared the reviewed upgrade PR on `chore/merman-0.9.0`.

@@ -1,0 +1,23 @@
+flowchart TB
+  subgraph Chat[apps/server/src/modules/agent]
+    WS[WebSocket /ws]
+    AS[service.ts: ciclo de herramientas]
+    TD[tools/consultar-fuentes-web.ts: definición y validación]
+  end
+  subgraph Sources[apps/server/src/modules/web-sources, propuesto]
+    SR[service.ts: consulta y política de vigencia]
+    RT[retrieval.ts: selección de fragmentos]
+    CA[cache.ts: TTL, actualización única por proceso]
+    EX[extractor.ts: fetch, limpieza, segmentación]
+    RE[repository.ts: configuración e instantáneas]
+  end
+  subgraph Data[PostgreSQL / Drizzle]
+    CFG[web_source]
+    SNAP[web_source_snapshot]
+  end
+  WS --> AS --> TD --> SR
+  SR --> RT --> SNAP
+  SR --> CA --> RE
+  CA --> EX --> RE
+  RE --> CFG
+  RE --> SNAP

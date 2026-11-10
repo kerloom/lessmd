@@ -237,6 +237,14 @@ mod tests {
 
     #[cfg(feature = "mermaid")]
     #[test]
+    fn merman_reports_unroutable_cross_subgraph_routes() {
+        let source = include_str!("../../tests/fixtures/mermaid-routing.mmd");
+        let error = render_with_merman(source, merman::OperationControl::new()).unwrap_err();
+        assert!(error.contains("unroutable graph edges"), "{error}");
+    }
+
+    #[cfg(feature = "mermaid")]
+    #[test]
     fn merman_preserves_unicode_grapheme_labels() {
         let source = "flowchart LR\nA[\"Cafe\u{301} 👩‍💻 東京\"] --> B[Done]";
         let output = render_with_merman(source, merman::OperationControl::new()).unwrap();

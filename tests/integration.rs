@@ -274,6 +274,17 @@ fn markdown_renders_via_render_module() {
     assert!(text.contains("bold"));
 }
 
+#[cfg(feature = "mermaid")]
+#[test]
+fn markdown_unroutable_flowchart_preserves_source() {
+    let source = include_str!("fixtures/mermaid-routing.mmd");
+    let markdown = format!("```mermaid\n{source}```\n");
+    let text = all_text(&render_markdown(&markdown, 240).lines);
+    assert!(text.contains("unroutable graph edges"), "{text}");
+    assert!(text.contains("WS --> AS --> TD --> SR"), "{text}");
+    assert!(text.contains("RE --> SNAP"), "{text}");
+}
+
 #[cfg(not(feature = "mermaid"))]
 #[test]
 fn markdown_mermaid_fixture_falls_back_without_feature() {
