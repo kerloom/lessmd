@@ -119,6 +119,8 @@ cargo test --features mermaid      # once phase 2 lands
 
 ## Session Tracker
 
+- 2026-11-10: Upgraded Merman to v0.10.0-alpha.1 with explicit diagram features. Recorded the reported cross-subgraph flowchart as a regression fixture; upstream still reports its edges as unroutable.
+
 - 2026-09-17: Upgraded Merman from `v0.8.0-alpha.5` to `v0.8.0-alpha.6` and migrated terminal rendering from the removed `HeadlessAsciiRenderer` API to operation-scoped `Renderer` and typed ASCII requests. Preserved strict parsing, Unicode output, caching, worker timeout, panic isolation, and source fallback. Added cooperative deadline/cancellation handling and focused coverage for Unicode graphemes, long label wrapping, no-diagram errors, fork/join and choice rendering, and unsupported complex state routing fallback. Verified fmt, clippy, and tests with default and no-default features.
 - 2026-08-10: Replaced Figurehead with Merman `v0.8.0-alpha.5` from its GitHub release tag, enabling only the `ascii` capability. Removed Figurehead syntax/retry workarounds, preserved timeout/cache/panic isolation and raw fallback, raised MSRV to Rust 1.95, updated tests for Merman's supported and explicitly unsupported state layouts, and bumped lessmd to 0.6.0. Verified release build, fmt, clippy, and tests with default and no-default features.
 - 2026-07-30: Fixed complex Mermaid flowcharts that use named subgraphs, quoted node labels, and basic HTML labels being partially rendered as bare node IDs. Added pre-render syntax normalization and a synthetic regression test covering multiple subgraphs, decision branches, cross-subgraph edges, styles, and HTML labels. Verified fmt, clippy, and tests with default and no-default features.
